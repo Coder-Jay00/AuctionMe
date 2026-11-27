@@ -17,6 +17,9 @@ const config = {
       process.env.POSTGRES_DB || 'live_auction'
     }`,
   closingWorkerIntervalMs: Number(process.env.CLOSING_WORKER_INTERVAL_MS || 1000),
+  demoPassword:
+    process.env.DEMO_PASSWORD ||
+    (process.env.NODE_ENV === 'production' ? '' : 'AuctionMe@2025'),
 };
 
 module.exports = config;

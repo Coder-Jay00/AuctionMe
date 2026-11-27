@@ -1,0 +1,20 @@
+{
+  "name": "live-auction-backend",
+  "version": "1.0.0",
+  "description": "Transaction-safe Live Auction Platform backend (Express + PostgreSQL + Socket.IO)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:init": "node scripts/init-db.js",
+    "db:seed": "node scripts/seed.js",
+    "test:concurrency": "node scripts/concurrency-test.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pg": "^8.13.1",
+    "socket.io": "^4.8.1"
+  }
+}

@@ -249,54 +249,9 @@ export default function LoginForm() {
         </Link>
       </div>
 
-      {/* Footer Links */}
+      {/* Footer */}
       <footer className="border-t border-slate-200/80 pt-5 text-center dark:border-slate-800/80">
-        <nav
-          aria-label="Legal and support"
-          className="flex items-center justify-center gap-3 text-[11px] text-slate-500 dark:text-slate-400"
-        >
-          <a
-            href="#terms"
-            onClick={(e) => {
-              e.preventDefault();
-              setInfoNote('Terms & Conditions page coming soon.');
-            }}
-            className="transition hover:text-slate-900 dark:hover:text-slate-200"
-          >
-            <span className="hidden sm:inline">Terms &amp; Conditions</span>
-            <span className="sm:hidden">Terms</span>
-          </a>
-          <span className="text-slate-300 dark:text-slate-700" aria-hidden="true">
-            |
-          </span>
-          <a
-            href="#privacy"
-            onClick={(e) => {
-              e.preventDefault();
-              setInfoNote('Privacy Policy page coming soon.');
-            }}
-            className="transition hover:text-slate-900 dark:hover:text-slate-200"
-          >
-            <span className="hidden sm:inline">Privacy Policy</span>
-            <span className="sm:hidden">Privacy</span>
-          </a>
-          <span className="text-slate-300 dark:text-slate-700" aria-hidden="true">
-            |
-          </span>
-          <a
-            href="#help"
-            onClick={(e) => {
-              e.preventDefault();
-              setInfoNote('Help Center page coming soon.');
-            }}
-            className="transition hover:text-slate-900 dark:hover:text-slate-200"
-          >
-            <span className="hidden sm:inline">Help Center</span>
-            <span className="sm:hidden">Help</span>
-          </a>
-        </nav>
-
-        <p className="mt-2 hidden text-[10px] text-slate-400 sm:block dark:text-slate-500">
+        <p className="text-[10px] text-slate-400 dark:text-slate-500">
           © 2025 AuctionMe. All rights reserved.
         </p>
 

@@ -12,7 +12,6 @@ const SIDEBAR_ITEMS = [
   { id: 'result', label: 'Auction Result', href: '/result' },
   { id: 'notifications', label: 'Notifications', href: '/notifications' },
   { id: 'settings', label: 'Profile & Settings', href: '/settings' },
-  { id: 'help', label: 'Help & Support', href: '/help' },
 ];
 
 const MOBILE_ITEMS = [
@@ -20,7 +19,6 @@ const MOBILE_ITEMS = [
   { id: 'ledger', label: 'Ledger', href: '/ledger' },
   { id: 'notifications', label: 'Alerts', href: '/notifications' },
   { id: 'settings', label: 'Settings', href: '/settings' },
-  { id: 'help', label: 'Help', href: '/help' },
 ];
 
 export default function BidderShell({

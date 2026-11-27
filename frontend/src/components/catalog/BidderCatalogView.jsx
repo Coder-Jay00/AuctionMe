@@ -462,11 +462,6 @@ export default function BidderCatalogView() {
         description:
           'Won lots and acquired items will appear here once bidder portfolio APIs are connected.',
       },
-      help: {
-        title: 'Help & Support',
-        description:
-          'Need assistance with bidding, anti-sniping +30s extensions, or auction settlement? Contact AuctionMe Bidder Support.',
-      },
     }[activeSection];
 
     return (

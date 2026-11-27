@@ -135,17 +135,6 @@ const NAV_ITEMS = [
       </svg>
     ),
   },
-  {
-    id: 'help',
-    label: 'Help & Support',
-    mobileLabel: 'Help',
-    icon: (
-      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-4 w-4">
-        <circle cx="10" cy="10" r="7" />
-        <path strokeLinecap="round" d="M8.2 7.8a2 2 0 113.2 1.6c-.7.5-1.4.9-1.4 1.8M10 13.8h.01" />
-      </svg>
-    ),
-  },
 ];
 
 export default function CatalogShell({

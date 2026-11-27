@@ -47,7 +47,6 @@ export default function SignupForm() {
   const [auctionMeId, setAuctionMeId] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -57,12 +56,10 @@ export default function SignupForm() {
     auctionMeId: false,
     password: false,
     confirmPassword: false,
-    acceptedTerms: false,
   });
 
   const [formStatus, setFormStatus] = useState('idle'); // idle | loading | error | success
   const [apiError, setApiError] = useState(null);
-  const [infoNote, setInfoNote] = useState(null);
 
   const passwordRules = useMemo(
     () => evaluatePasswordRules(password),
@@ -76,9 +73,8 @@ export default function SignupForm() {
         auctionMeId,
         password,
         confirmPassword,
-        acceptedTerms,
       }),
-    [displayName, auctionMeId, password, confirmPassword, acceptedTerms]
+    [displayName, auctionMeId, password, confirmPassword]
   );
 
   const isLoading = formStatus === 'loading';
@@ -91,7 +87,6 @@ export default function SignupForm() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setInfoNote(null);
     setApiError(null);
 
     setTouched({
@@ -99,7 +94,6 @@ export default function SignupForm() {
       auctionMeId: true,
       password: true,
       confirmPassword: true,
-      acceptedTerms: true,
     });
 
     if (!validation.isValid) {
@@ -255,53 +249,6 @@ export default function SignupForm() {
       {/* Password Requirements Checklist */}
       <PasswordRequirementsBox rules={passwordRules} />
 
-      {/* Terms & Conditions + Privacy Policy Checkbox */}
-      <div className="space-y-1 pt-0.5">
-        <label className="flex cursor-pointer items-start gap-2.5 select-none">
-          <input
-            type="checkbox"
-            checked={acceptedTerms}
-            onChange={(e) => {
-              setAcceptedTerms(e.target.checked);
-              markTouched('acceptedTerms');
-            }}
-            disabled={isLoading || isSuccess}
-            className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 bg-white text-auctionme-emeraldLight focus:ring-auctionme-emeraldLight dark:border-slate-600 dark:bg-auctionme-darkInput dark:text-auctionme-emeraldDark dark:focus:ring-auctionme-emeraldDark"
-          />
-          <span className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-            I agree to the{' '}
-            <a
-              href="#terms"
-              onClick={(e) => {
-                e.preventDefault();
-                setInfoNote('Terms & Conditions page is not yet published.');
-              }}
-              className="font-medium text-auctionme-emeraldLight hover:underline dark:text-auctionme-emeraldDark"
-            >
-              Terms &amp; Conditions
-            </a>{' '}
-            and{' '}
-            <a
-              href="#privacy"
-              onClick={(e) => {
-                e.preventDefault();
-                setInfoNote('Privacy Policy page is not yet published.');
-              }}
-              className="font-medium text-auctionme-emeraldLight hover:underline dark:text-auctionme-emeraldDark"
-            >
-              Privacy Policy
-            </a>
-            .<span className="ml-0.5 text-rose-600 dark:text-rose-400">*</span>
-          </span>
-        </label>
-
-        {touched.acceptedTerms && validation.errors.acceptedTerms && (
-          <p role="alert" className="text-xs font-medium text-rose-600 dark:text-rose-400">
-            {validation.errors.acceptedTerms}
-          </p>
-        )}
-      </div>
-
       {/* API Error / Missing Integration / Success Banner */}
       <AuthStatusAlert
         status={formStatus === 'success' ? 'success' : apiError ? 'error' : null}
@@ -312,13 +259,7 @@ export default function SignupForm() {
         }
       />
 
-      {infoNote && !apiError && (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-300">
-          {infoNote}
-        </div>
-      )}
-
-      {/* Primary Submit Button — Disabled until all required fields are valid & terms accepted */}
+      {/* Primary Submit Button — Disabled until all required fields are valid */}
       <button
         type="submit"
         disabled={!canSubmit}
@@ -345,54 +286,9 @@ export default function SignupForm() {
         </Link>
       </div>
 
-      {/* Footer Links */}
+      {/* Footer */}
       <footer className="border-t border-slate-200/80 pt-4 text-center dark:border-slate-800/80">
-        <nav
-          aria-label="Legal and support"
-          className="flex items-center justify-center gap-3 text-[11px] text-slate-500 dark:text-slate-400"
-        >
-          <a
-            href="#terms"
-            onClick={(e) => {
-              e.preventDefault();
-              setInfoNote('Terms & Conditions page is not yet published.');
-            }}
-            className="transition hover:text-slate-900 dark:hover:text-slate-200"
-          >
-            <span className="hidden sm:inline">Terms &amp; Conditions</span>
-            <span className="sm:hidden">Terms</span>
-          </a>
-          <span className="text-slate-300 dark:text-slate-700" aria-hidden="true">
-            |
-          </span>
-          <a
-            href="#privacy"
-            onClick={(e) => {
-              e.preventDefault();
-              setInfoNote('Privacy Policy page is not yet published.');
-            }}
-            className="transition hover:text-slate-900 dark:hover:text-slate-200"
-          >
-            <span className="hidden sm:inline">Privacy Policy</span>
-            <span className="sm:hidden">Privacy</span>
-          </a>
-          <span className="text-slate-300 dark:text-slate-700" aria-hidden="true">
-            |
-          </span>
-          <a
-            href="#help"
-            onClick={(e) => {
-              e.preventDefault();
-              setInfoNote('Help Center page is not yet published.');
-            }}
-            className="transition hover:text-slate-900 dark:hover:text-slate-200"
-          >
-            <span className="hidden sm:inline">Help Center</span>
-            <span className="sm:hidden">Help</span>
-          </a>
-        </nav>
-
-        <p className="mt-1.5 hidden text-[10px] text-slate-400 sm:block dark:text-slate-500">
+        <p className="text-[10px] text-slate-400 dark:text-slate-500">
           © 2025 AuctionMe. All rights reserved.
         </p>
 

@@ -74,14 +74,12 @@ export function validateSignupForm({
   auctionMeId,
   password,
   confirmPassword,
-  acceptedTerms,
 }) {
   const errors = {
     displayName: validateDisplayName(displayName),
     auctionMeId: validateAuctionMeId(auctionMeId),
     password: validatePassword(password),
     confirmPassword: validateConfirmPassword(password, confirmPassword),
-    acceptedTerms: acceptedTerms ? null : 'You must agree to continue.',
   };
 
   const isValid = Object.values(errors).every((err) => err === null);

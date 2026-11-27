@@ -11,7 +11,6 @@ const NAV_ITEMS = [
   { label: 'Watchlist', href: '/watchlist', active: false },
   { label: 'Notifications', href: '/notifications', active: false },
   { label: 'Profile & Settings', href: '/settings', active: false },
-  { label: 'Help & Support', href: '/help', active: false },
 ];
 
 export default function ResultSidebar({ currentBidderId }) {

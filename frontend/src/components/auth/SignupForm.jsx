@@ -1,11 +1,13 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AuthInputField from './AuthInputField';
 import AuthStatusAlert from './AuthStatusAlert';
 import PasswordStrengthMeter from './PasswordStrengthMeter';
 import PasswordRequirementsBox from './PasswordRequirementsBox';
+import { registerWithAuctionMeId } from '../../services/authApi';
 import {
   evaluatePasswordRules,
   validateSignupForm,
@@ -40,6 +42,7 @@ function EyeToggleButton({ visible, onToggle, disabled, label }) {
 }
 
 export default function SignupForm() {
+  const router = useRouter();
   const [displayName, setDisplayName] = useState('');
   const [auctionMeId, setAuctionMeId] = useState('');
   const [password, setPassword] = useState('');
@@ -103,12 +106,23 @@ export default function SignupForm() {
       return;
     }
 
-    // Backend inspection confirmed no registration or AuctionMe ID availability
-    // endpoint exists in Express yet. Never fabricate a successful registration.
-    setFormStatus('error');
-    setApiError(
-      'Unable to create account: backend registration and AuctionMe ID availability endpoints are not implemented yet.'
-    );
+    setFormStatus('loading');
+    try {
+      await registerWithAuctionMeId({
+        displayName,
+        auctionMeId,
+        password,
+      });
+      setFormStatus('success');
+      setTimeout(() => {
+        router.push('/auctions');
+      }, 900);
+    } catch (err) {
+      setFormStatus('error');
+      setApiError(
+        err?.message || 'Unable to create account. Please try again.'
+      );
+    }
   };
 
   return (

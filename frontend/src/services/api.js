@@ -46,7 +46,40 @@ export async function submitBid(auctionId, { bidderId, amount, requestId, socket
   const res = await fetch(`${API_BASE}/api/auctions/${auctionId}/bids`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify({ bidderId, amount, requestId, socketId }),
+  });
+  return parseResponse(res);
+}
+
+export async function fetchMyBids(limit = 100) {
+  const res = await fetch(`${API_BASE}/api/me/bids?limit=${limit}`, {
+    cache: 'no-store',
+    credentials: 'include',
+  });
+  return parseResponse(res);
+}
+
+export async function fetchWatchlist() {
+  const res = await fetch(`${API_BASE}/api/me/watchlist`, {
+    cache: 'no-store',
+    credentials: 'include',
+  });
+  return parseResponse(res);
+}
+
+export async function addToWatchlist(auctionId) {
+  const res = await fetch(`${API_BASE}/api/me/watchlist/${auctionId}`, {
+    method: 'POST',
+    credentials: 'include',
+  });
+  return parseResponse(res);
+}
+
+export async function removeFromWatchlist(auctionId) {
+  const res = await fetch(`${API_BASE}/api/me/watchlist/${auctionId}`, {
+    method: 'DELETE',
+    credentials: 'include',
   });
   return parseResponse(res);
 }

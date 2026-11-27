@@ -110,6 +110,40 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
   ON audit_logs (created_at DESC);
 
+-- User Notifications (bid accepted, outbid, auction extended, result declared)
+CREATE TABLE IF NOT EXISTS notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  auction_id UUID REFERENCES auctions(id) ON DELETE CASCADE,
+  type VARCHAR(40) NOT NULL CHECK (
+    type IN ('BID_ACCEPTED', 'OUTBID', 'AUCTION_EXTENDED', 'RESULT_DECLARED', 'SYSTEM')
+  ),
+  title VARCHAR(160) NOT NULL,
+  message TEXT NOT NULL,
+  is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_created_at
+  ON notifications (user_id, created_at DESC);
+
+-- Complaints / Disputes for Admin Moderation
+CREATE TABLE IF NOT EXISTS complaints (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  reporter_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  auction_id UUID REFERENCES auctions(id) ON DELETE SET NULL,
+  subject VARCHAR(160) NOT NULL,
+  description TEXT NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'UNDER_REVIEW', 'RESOLVED', 'DISMISSED')),
+  resolution_note TEXT,
+  resolved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_complaints_status_created_at
+  ON complaints (status, created_at DESC);
+
 -- Indexes for core auction engine & personal queries
 CREATE INDEX IF NOT EXISTS idx_auctions_status_ends_at
   ON auctions (status, ends_at);

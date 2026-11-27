@@ -11,12 +11,16 @@ import NotificationToast from '../NotificationToast';
 import { useAuctionSocket } from '../../hooks/useAuctionSocket';
 import { useThemePreference } from '../../hooks/useThemePreference';
 import {
+  addToWatchlist,
   fetchAuction,
   fetchAuctionBids,
   fetchAuctionResult,
   fetchAuctions,
+  fetchWatchlist,
+  removeFromWatchlist,
   submitBid,
 } from '../../services/api';
+import { fetchCurrentUser } from '../../services/authApi';
 import {
   formatINR,
   generateRequestId,
@@ -50,32 +54,68 @@ export default function LiveAuctionRoomView({ initialAuctionId = null }) {
   const versionRef = useRef(0);
   const auctionIdRef = useRef(initialAuctionId);
 
-  // Load persisted watchlist
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(WATCHLIST_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) setWatchlistIds(parsed);
-      }
-    } catch {
-      // Ignore storage errors
-    }
-  }, []);
+  const [authenticatedUser, setAuthenticatedUser] = useState(null);
 
-  const toggleWatchlist = useCallback((id) => {
-    setWatchlistIds((prev) => {
-      const next = prev.includes(id)
-        ? prev.filter((item) => item !== id)
-        : [...prev, id];
+  // Sync authenticated session & watchlist on mount
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const user = await fetchCurrentUser();
+      if (!active) return;
+      if (user) {
+        setAuthenticatedUser(user);
+        setBidderId(user.auctionMeId);
+        try {
+          const wl = await fetchWatchlist();
+          if (active && Array.isArray(wl?.auctionIds)) {
+            setWatchlistIds(wl.auctionIds);
+          }
+        } catch {
+          // Ignore watchlist fetch failure
+        }
+        return;
+      }
       try {
-        window.localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(next));
+        const raw = window.localStorage.getItem(WATCHLIST_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) setWatchlistIds(parsed);
+        }
       } catch {
         // Ignore storage errors
       }
-      return next;
-    });
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
+
+  const toggleWatchlist = useCallback(
+    (id) => {
+      setWatchlistIds((prev) => {
+        const exists = prev.includes(id);
+        const next = exists
+          ? prev.filter((item) => item !== id)
+          : [...prev, id];
+        if (authenticatedUser) {
+          (exists ? removeFromWatchlist(id) : addToWatchlist(id)).catch(
+            () => {}
+          );
+        } else {
+          try {
+            window.localStorage.setItem(
+              WATCHLIST_STORAGE_KEY,
+              JSON.stringify(next)
+            );
+          } catch {
+            // Ignore storage errors
+          }
+        }
+        return next;
+      });
+    },
+    [authenticatedUser]
+  );
 
   const pushToast = useCallback((type, title, message) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;

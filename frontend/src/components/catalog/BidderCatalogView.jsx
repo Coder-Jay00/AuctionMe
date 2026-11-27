@@ -11,7 +11,14 @@ import {
   NoAuctionsAvailableState,
   NoSearchResultsState,
 } from './CatalogStates';
-import { fetchAuction, fetchAuctions } from '../../services/api';
+import {
+  addToWatchlist,
+  fetchAuction,
+  fetchAuctions,
+  fetchWatchlist,
+  removeFromWatchlist,
+} from '../../services/api';
+import { fetchCurrentUser } from '../../services/authApi';
 import { useCatalogSocket } from '../../hooks/useCatalogSocket';
 import { useThemePreference } from '../../hooks/useThemePreference';
 import { formatINR } from '../../utils/formatters';
@@ -53,35 +60,70 @@ export default function BidderCatalogView() {
   const versionsRef = useRef(new Map());
   const seenBidIdsRef = useRef(new Set());
 
-  // Load persisted watchlist on mount
+  const [authenticatedUser, setAuthenticatedUser] = useState(null);
+
+  // Load persisted watchlist (server-backed when signed in, localStorage fallback for guests)
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(WATCHLIST_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          setWatchlistIds(parsed.filter((id) => typeof id === 'string'));
+    let active = true;
+    (async () => {
+      const user = await fetchCurrentUser();
+      if (!active) return;
+      if (user) {
+        setAuthenticatedUser(user);
+        try {
+          const wl = await fetchWatchlist();
+          if (active && Array.isArray(wl?.auctionIds)) {
+            setWatchlistIds(wl.auctionIds);
+          }
+        } catch {
+          // Ignore watchlist fetch failure
         }
+        return;
       }
-    } catch {
-      // Ignore storage read errors
-    }
+      try {
+        const raw = window.localStorage.getItem(WATCHLIST_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            setWatchlistIds(parsed.filter((id) => typeof id === 'string'));
+          }
+        }
+      } catch {
+        // Ignore storage read errors
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const toggleWatchlist = useCallback((auctionId) => {
-    setWatchlistIds((prev) => {
-      const exists = prev.includes(auctionId);
-      const next = exists
-        ? prev.filter((id) => id !== auctionId)
-        : [...prev, auctionId];
-      try {
-        window.localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        // Ignore storage write errors
-      }
-      return next;
-    });
-  }, []);
+  const toggleWatchlist = useCallback(
+    (auctionId) => {
+      setWatchlistIds((prev) => {
+        const exists = prev.includes(auctionId);
+        const next = exists
+          ? prev.filter((id) => id !== auctionId)
+          : [...prev, auctionId];
+        if (authenticatedUser) {
+          (exists
+            ? removeFromWatchlist(auctionId)
+            : addToWatchlist(auctionId)
+          ).catch(() => {});
+        } else {
+          try {
+            window.localStorage.setItem(
+              WATCHLIST_STORAGE_KEY,
+              JSON.stringify(next)
+            );
+          } catch {
+            // Ignore storage write errors
+          }
+        }
+        return next;
+      });
+    },
+    [authenticatedUser]
+  );
 
   const syncClockOffset = useCallback((serverTimeIso) => {
     if (!serverTimeIso) return;

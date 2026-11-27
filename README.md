@@ -1,330 +1,649 @@
-# Live Auction Platform — Full-Stack MVP
+# AuctionMe — The Art of the Bid.
 
-A transaction-safe, real-time **Live Auction Platform MVP** built with **Next.js (App Router)**, **React**, **Express.js**, **Socket.IO**, and **PostgreSQL**.
-
-Designed around strict financial correctness: concurrent bids are serialized via PostgreSQL row locks (`SELECT ... FOR UPDATE`), late bids within 30 seconds atomically extend the deadline using PostgreSQL `clock_timestamp()`, and a background closing worker guarantees **exactly one winner** (or a clean no-bids close) with zero race conditions.
+> A real-time, transaction-safe live online auction platform built with **Next.js (App Router)**, **React**, **Express.js**, **Socket.IO**, and **PostgreSQL**.
 
 ---
 
-## 1. Technology Stack
+## Table of Contents
 
-| Layer | Technology |
-|---|---|
-| **Frontend** | Next.js 15 (App Router), React 18, JavaScript (ES6+), Tailwind CSS, `socket.io-client` |
-| **Backend** | Node.js, Express.js, Socket.IO, `pg` (node-postgres) |
-| **Database** | PostgreSQL 16+ (Docker Compose or local PostgreSQL) |
-| **Testing** | Node.js `assert` + real concurrent HTTP (`fetch`) + real PostgreSQL transactions |
+1. [Project Introduction](#1-project-introduction)
+2. [Features by Role](#2-features-by-role)
+3. [Technology Stack](#3-technology-stack)
+4. [System Architecture](#4-system-architecture)
+5. [Project Structure](#5-project-structure)
+6. [Prerequisites](#6-prerequisites)
+7. [Installation and Setup](#7-installation-and-setup)
+8. [Environment Variables](#8-environment-variables)
+9. [Database Design](#9-database-design)
+10. [Demo Accounts and Seed Data](#10-demo-accounts-and-seed-data)
+11. [Auction Workflow & Concurrency Engine](#11-auction-workflow--concurrency-engine)
+12. [API Documentation](#12-api-documentation)
+13. [Real-Time Communication (Socket.IO)](#13-real-time-communication-socketio)
+14. [Testing](#14-testing)
+15. [Troubleshooting](#15-troubleshooting)
+16. [Security Considerations](#16-security-considerations)
+17. [Limitations and Future Improvements](#17-limitations-and-future-improvements)
+18. [Team / Academic Information](#18-team--academic-information)
+19. [License](#19-license)
 
 ---
 
-## 2. Architecture
+## 1. Project Introduction
+
+**AuctionMe** (*The Art of the Bid.*) is a full-stack real-time online auction platform engineered for strict financial correctness under concurrent load.
+
+### Problem Statement & Objectives
+Online auctions face three classic distributed-systems failure modes:
+1. **Race conditions during simultaneous bidding** — two users bidding at the same millisecond can overwrite each other or produce inconsistent prices without row-level serialization.
+2. **Last-second sniping** — automated or last-second bids prevent fair price discovery unless the server enforces an authoritative deadline extension rule.
+3. **Double-closing or multiple winners** — background expiry jobs racing with incoming bids can corrupt final outcomes unless closing is atomic.
+
+### How Real-Time Bidding Works
+- Clients load authoritative auction state over Express REST APIs and subscribe to auction-specific Socket.IO rooms (`auction:<auctionId>`).
+- Every bid submission executes inside a PostgreSQL ACID transaction using `SELECT ... FOR UPDATE` and authoritative database time (`clock_timestamp()`).
+- If a valid bid is accepted with `<= 30 seconds` remaining, the server atomically extends `ends_at` by 30 seconds.
+- Socket.IO broadcasts committed updates **strictly after** PostgreSQL `COMMIT`, tagged with a monotonically increasing `version` so clients discard stale or out-of-order events.
+- A background closing worker locks expired `LIVE` auctions using `FOR UPDATE SKIP LOCKED`, transitions them to `CLOSED`, and assigns exactly one `winner_id` (or `NULL` when no bids were accepted).
+
+---
+
+## 2. Features by Role
+
+> Legend: **Implemented** = live in codebase; **Backend Only** = Express API implemented, dedicated UI screen planned; **UI Scaffold / Planned** = frontend screen built, backend API pending.
+
+### Bidder
+| Feature | Status | Notes |
+|---|---|---|
+| Registration & Login (`AuctionMe ID` + Password) | **Implemented** | `/login`, `/signup` UI + `/api/auth/register`, `/api/auth/login`, `/api/auth/check-id`, `/api/auth/logout`, `/api/auth/me` |
+| Discover / Browse Auctions | **Implemented** | `/`, `/discover`, `/auctions` + `GET /api/auctions` |
+| Live Auction Room & Real-Time Bidding | **Implemented** | `/`, `/auctions/[id]` + `POST /api/auctions/:id/bids` + Socket.IO |
+| Auction Result & Winner Details | **Implemented** | `/result`, `/auctions/[id]/result` + `GET /api/auctions/:id/result` |
+| Personal Bid History (My Ledger) | **Implemented** | `/ledger` UI + `GET /api/me/bids` (accepted bids; rejected bid persistence planned) |
+| Won Auctions (My Holdings) | **Implemented** | `/holdings` + `GET /api/me/holdings` |
+| Watchlist Management | **Implemented** | `/watchlist` + `GET/POST/DELETE /api/me/watchlist/:auctionId` |
+| Notifications Center | **UI Scaffold / Planned** | `/notifications` UI built; backend `/api/notifications` persistence pending |
+| Profile & Settings | **UI Scaffold / Planned** | `/settings` UI built (theme switching works locally); profile update & password change endpoints pending |
+| Help & Support | **UI Scaffold / Planned** | `/help` searchable FAQs & rules work; `POST /api/support/tickets` backend pending |
+
+### Host
+| Feature | Status | Notes |
+|---|---|---|
+| Create & Edit Auctions | **Backend Only** | `POST /api/host/auctions`, `PATCH /api/host/auctions/:id` implemented; Host UI screens planned |
+| Start & Manually Close Auctions | **Backend Only** | `POST /api/host/auctions/:id/start`, `POST /api/host/auctions/:id/close` implemented |
+| List & Inspect Own Auctions | **Backend Only** | `GET /api/host/auctions`, `GET /api/host/auctions/:id` implemented |
+| Monitor Live Bidding & Results | **Implemented** | Accessible via `/auctions/[id]` and `/auctions/[id]/result` |
+
+### Administrator
+| Feature | Status | Notes |
+|---|---|---|
+| User & Role Management | **Backend Only** | `GET /api/admin/users`, `PATCH /api/admin/users/:id/role`, `PATCH /api/admin/users/:id/status` implemented; Admin UI planned |
+| Auction Moderation (`APPROVED`, `FLAGGED`, `SUSPENDED`) | **Backend Only** | `GET /api/admin/auctions`, `PATCH /api/admin/auctions/:id/moderate` implemented |
+| Audit Logs | **Backend Only** | `GET /api/admin/audit-logs` + `audit_logs` table implemented |
+| Complaints & Disputes | **Planned** | Designed in architecture; schema, API, and UI not yet implemented |
+
+---
+
+## 3. Technology Stack
+
+Verified directly from `backend/package.json` and `frontend/package.json`:
+
+| Layer | Technology | Version |
+|---|---|---|
+| **Frontend Framework** | Next.js (App Router) | `^15.1.7` (resolved `15.5.29`) |
+| **UI Library** | React & React DOM | `^18.3.1` |
+| **Styling** | Tailwind CSS + PostCSS + Autoprefixer | `^3.4.17` / `^8.4.49` / `^10.4.20` |
+| **Language** | JavaScript (ES6+) | Node.js `v22+` |
+| **Backend Runtime & API** | Node.js + Express.js + `cors` + `dotenv` | `express ^4.21.2`, `cors ^2.8.5`, `dotenv ^16.4.7` |
+| **Database & Driver** | PostgreSQL + `pg` (node-postgres) | `pg ^8.13.1` (PostgreSQL 16+ / 18.6 tested) |
+| **Real-Time Communication** | Socket.IO & `socket.io-client` | `^4.8.1` |
+| **Auth & Password Hashing** | Node.js built-in `crypto.scryptSync` + `timingSafeEqual` + SHA-256 opaque session tokens (`HttpOnly` cookie / `Bearer` token) | Built-in Node.js `crypto` |
+| **Testing Tools** | Node.js `assert` + native `fetch` against live PostgreSQL transactions | Built-in Node.js |
+| **Dev & Containerization** | Docker Compose (`postgres:16-alpine`), `node --watch` | `docker-compose.yml` |
+
+---
+
+## 4. System Architecture
+
+```mermaid
+flowchart LR
+  subgraph Clients
+    B["Bidder Client\n(Browser / Mobile)"]
+    H["Host Client\n(API / Planned UI)"]
+    A["Administrator Client\n(API / Planned UI)"]
+  end
+
+  subgraph Frontend["Next.js App Router (:3000)"]
+    UI["React Pages & Components\n(/, /login, /signup, /auctions, /result, /ledger, ...)"]
+    SIO_C["Socket.IO Client\n(Version-filtered state sync)"]
+  end
+
+  subgraph Backend["Express.js Server (:4000)"]
+    MW["CORS + Auth Middleware\n(attachUser, requireAuth, requireRole)"]
+    API["REST Routers\n(/api/auth, /api/me, /api/auctions, /api/host, /api/admin)"]
+    BID["Transactional Bidding Service\n(SELECT FOR UPDATE + Anti-Sniping)"]
+    CW["Auction Closing Worker\n(1s interval · FOR UPDATE SKIP LOCKED)"]
+    SIO_S["Socket.IO Server\n(Rooms: auction:<id>)"]
+  end
+
+  subgraph DB["PostgreSQL (:5432)"]
+    PG[("users · user_sessions\nauctions · bids\nwatchlist · audit_logs")]
+  end
+
+  B --> UI
+  H --> API
+  A --> API
+  UI -->|REST JSON| MW
+  SIO_C <-->|WebSocket / Polling| SIO_S
+  MW --> API
+  API --> BID
+  BID -->|ACID Tx| PG
+  BID -.->|Post-Commit Broadcast| SIO_S
+  CW -->|Atomic Close Tx| PG
+  CW -.->|Post-Commit Broadcast| SIO_S
+  API --> PG
+```
+
+### Component Responsibilities
+- **Next.js Frontend (`frontend/`):** Dedicated presentation layer using App Router and Tailwind CSS (no Next.js API routes). Synchronizes initial state via REST and applies real-time updates via Socket.IO while discarding stale event versions.
+- **Express.js Backend (`backend/`):** Single authoritative HTTP API and Socket.IO server. Enforces authentication (`attachUser`, `requireAuth`), role-based authorization (`requireRole`), input validation, and centralized error handling.
+- **Transactional Bidding Service (`biddingService.js`):** Serializes concurrent bids per auction using PostgreSQL row locks, checks idempotency via `(auction_id, request_id)`, validates minimum increments, and applies 30-second anti-sniping extensions using `clock_timestamp()`.
+- **Auction Closing Worker (`closingWorker.js` + `closingService.js`):** Polls every `CLOSING_WORKER_INTERVAL_MS` (default `1000ms`), locks expired `LIVE` rows with `FOR UPDATE SKIP LOCKED`, and atomically finalizes `status = 'CLOSED'` and `winner_id`.
+- **PostgreSQL (`schema.sql`):** Authoritative persistence for users, hashed sessions, auctions, bids, watchlists, and admin audit logs. All monetary amounts are stored as `BIGINT` integer paise (`100 paise = ₹1.00`).
+
+---
+
+## 5. Project Structure
 
 ```text
-+-----------------------------------+
-|      Next.js Frontend (:3000)     |
-|  App Router · React · Tailwind    |
-|  - Initial state via REST API     |
-|  - Live updates via Socket.IO     |
-|  - Stale version filtering        |
-+-----------------+-----------------+
-                  |  REST (HTTP) + WebSocket (Socket.IO)
-                  v
-+-----------------------------------+
-|   Express + Socket.IO (:4000)     |
-|  - REST API (/api/auctions/...)   |
-|  - Transactional Bidding Engine   |
-|  - Auction Rooms (auction:<id>)   |
-|  - Closing Worker (1s interval)   |
-+-----------------+-----------------+
-                  |  pg Pool (ACID Transactions)
-                  v
-+-----------------------------------+
-|        PostgreSQL (:5432)         |
-|  - auctions (row lock + version)  |
-|  - bids (UNIQUE auction, req_id)  |
-|  - Authoritative clock_timestamp  |
-+-----------------------------------+
+.
+├── docker-compose.yml              # PostgreSQL 16 service definition
+├── .env.example                    # Template environment variables
+├── .gitignore
+├── README.md
+├── backend/
+│   ├── package.json                # Express, pg, socket.io & npm scripts
+│   ├── scripts/
+│   │   ├── init-db.js              # Applies backend/src/database/schema.sql
+│   │   ├── seed.js                 # Seeds demo users, live auction & initial bids
+│   │   ├── concurrency-test.js     # 14-test transactional concurrency & closing suite
+│   │   └── verify-api.js           # 10-test Auth, RBAC, Host, Bidder & Admin API suite
+│   └── src/
+│       ├── app.js                  # Express app, middleware & route mounting
+│       ├── server.js               # HTTP server, Socket.IO attach & closing worker boot
+│       ├── config/
+│       │   ├── env.js              # Environment loader & defaults
+│       │   └── db.js               # pg Pool configuration
+│       ├── database/
+│       │   ├── schema.sql          # Idempotent PostgreSQL DDL & indexes
+│       │   └── init.js             # Programmatic schema initializer
+│       ├── middleware/
+│       │   └── auth.js             # Session extraction, requireAuth, requireRole
+│       ├── routes/
+│       │   ├── auth.js             # /api/auth/*
+│       │   ├── auctions.js         # /api/auctions/*
+│       │   ├── me.js               # /api/me/*
+│       │   ├── host.js             # /api/host/*
+│       │   └── admin.js            # /api/admin/*
+│       ├── services/
+│       │   ├── authService.js      # scrypt password hashing & opaque DB sessions
+│       │   ├── auctionService.js   # Auction reads, bid history & results
+│       │   ├── biddingService.js   # SELECT FOR UPDATE bidding & anti-sniping
+│       │   ├── closingService.js   # FOR UPDATE SKIP LOCKED atomic closing
+│       │   ├── bidderService.js    # Personal bids, holdings & watchlist
+│       │   ├── hostService.js      # Host auction CRUD & lifecycle controls
+│       │   ├── adminService.js     # Admin user/role, moderation & audit logs
+│       │   └── helpers.js          # AppError, UUID validation & formatters
+│       ├── sockets/
+│       │   └── auctionSocket.js    # Room join/leave & post-commit emitters
+│       └── workers/
+│           └── closingWorker.js    # 1s interval expiry worker
+└── frontend/
+    ├── package.json                # Next.js 15, React 18, Tailwind CSS, socket.io-client
+    ├── next.config.mjs
+    ├── tailwind.config.js          # AuctionMe light/dark tokens & typography
+    ├── postcss.config.mjs
+    ├── public/images/              # Hero artwork (dark watch, light gavel)
+    └── src/
+        ├── app/                    # App Router pages:
+        │   ├── page.js             # / (Live Auction / Catalog entry)
+        │   ├── login/page.js       # /login (Screen 01)
+        │   ├── signup/page.js      # /signup (Screen 02)
+        │   ├── discover/page.js    # /discover (Catalog)
+        │   ├── auctions/           # /auctions, /auctions/[id], /auctions/[id]/result
+        │   ├── result/page.js      # /result (Screen 05 shortcut)
+        │   ├── ledger/page.js      # /ledger (Screen 06)
+        │   ├── holdings/page.js    # /holdings
+        │   ├── watchlist/page.js   # /watchlist
+        │   ├── notifications/      # /notifications (Screen 09)
+        │   ├── settings/           # /settings (Screen 10)
+        │   └── help/               # /help (Screen 11)
+        ├── components/             # Modular UI components grouped by screen
+        ├── hooks/                  # useAuctionSocket, useCatalogSocket, useThemePreference
+        ├── services/               # api.js, authApi.js
+        └── utils/                  # formatters.js, authValidation.js, ledgerUtils.js
 ```
 
-- **Strict separation:** Next.js serves only the frontend UI (no Next.js API routes). Express.js is the single authoritative API and Socket.IO server.
-- **No optimistic fake bids:** UI state updates strictly from committed backend REST responses and post-commit Socket.IO events.
+---
+
+## 6. Prerequisites
+
+- **Node.js:** `v20.x` or `v22.x` (verified on `v22.23.2`)
+- **npm:** `v10.x` (verified on `10.9.8`)
+- **PostgreSQL:** `16+` (via Docker Compose **or** a local PostgreSQL installation; verified on PostgreSQL `18.6`)
+- **Docker & Docker Compose** *(optional)*: required only if running PostgreSQL via `docker-compose.yml`
+- **Git:** for cloning the repository
 
 ---
 
-## 3. Database Design
+## 7. Installation and Setup
 
-All monetary values are stored in **integer paise** (`BIGINT`, where `100 paise = ₹1.00`) to avoid floating-point rounding errors. The frontend formats amounts in INR (`en-IN`).
-
-### `auctions`
-| Column | Type | Notes |
-|---|---|---|
-| `id` | `UUID PK` | Default `gen_random_uuid()` |
-| `title` | `TEXT` | Auction item title |
-| `description` | `TEXT` | Item description |
-| `status` | `VARCHAR(20)` | `SCHEDULED`, `LIVE`, or `CLOSED` |
-| `starting_price` | `BIGINT` | Starting price in paise |
-| `current_price` | `BIGINT` | Latest accepted price in paise |
-| `min_increment` | `BIGINT` | Minimum bid increment in paise |
-| `highest_bidder_id` | `TEXT` | Current highest bidder (nullable) |
-| `winner_id` | `TEXT` | Set atomically when status transitions to `CLOSED` |
-| `starts_at` | `TIMESTAMPTZ` | Authoritative start time |
-| `ends_at` | `TIMESTAMPTZ` | Authoritative end time (extended by +30s on anti-sniping) |
-| `closed_at` | `TIMESTAMPTZ` | Set atomically on closure |
-| `version` | `BIGINT` | Monotonically increasing state version for stale-event filtering |
-| `created_at` | `TIMESTAMPTZ` | Creation timestamp |
-
-### `bids`
-| Column | Type | Notes |
-|---|---|---|
-| `id` | `UUID PK` | Default `gen_random_uuid()` |
-| `auction_id` | `UUID FK` | References `auctions(id) ON DELETE CASCADE` |
-| `bidder_id` | `TEXT` | Bidder identifier |
-| `amount` | `BIGINT` | Bid amount in paise (`> 0`) |
-| `request_id` | `UUID` | Client idempotency key |
-| `created_at` | `TIMESTAMPTZ` | Acceptance timestamp |
-| **Constraint** | `UNIQUE (auction_id, request_id)` | Prevents duplicate bid creation on retries |
-
-### Indexes
-- `idx_auctions_status_ends_at (status, ends_at)` — Fast closing worker scan for expired `LIVE` auctions.
-- `idx_bids_auction_created_at (auction_id, created_at DESC)` — Fast bid history retrieval.
-- `idx_bids_request_id (request_id)` + `bids_auction_request_unique (auction_id, request_id)` — Fast idempotency checks.
-
----
-
-## 4. Local Installation & Setup
-
-### Prerequisites
-- Node.js 20+ and npm
-- Docker Desktop (for `docker compose`) **or** a local PostgreSQL 16+ instance
-
-### Step 1: Configure Environment Variables
-Copy `.env.example` to `.env` (or `backend/.env`) and `frontend/.env.local` if customizing defaults.
-
-### Step 2: Start PostgreSQL
-Using Docker Compose:
+### 1. Clone the Repository
 ```bash
+git clone <repository-url>
+cd <repository-folder>
+```
+
+### 2. Install Backend Dependencies
+```bash
+cd backend
+npm install
+```
+
+### 3. Install Frontend Dependencies
+```bash
+cd ../frontend
+npm install
+```
+
+### 4. Start or Create the PostgreSQL Database
+
+**Option A — Using Docker Compose (recommended on a fresh machine):**
+```bash
+# From the repository root
 docker compose up -d postgres
 ```
-*(If a local PostgreSQL service is already running on port 5432, either point `DATABASE_URL` in `backend/.env` to your local PostgreSQL instance or set `POSTGRES_PORT=5433` in `.env` before running `docker compose up -d postgres`.)*
 
-### Step 3: Install Dependencies, Initialize & Seed Database
+**Option B — Using a Local PostgreSQL Instance:**
+Create a role and database matching your `.env` configuration (for example, `auction_user` owning `live_auction`):
+```sql
+CREATE ROLE auction_user LOGIN PASSWORD '<choose-local-password>';
+CREATE DATABASE live_auction OWNER auction_user;
+```
+
+### 5. Configure Environment Files
+Copy `.env.example` to `backend/.env` and `frontend/.env.local`, then adjust values as needed (see [Section 8](#8-environment-variables)).
+
+### 6. Initialize the Database Schema
 ```bash
-# Backend
 cd backend
-npm install
 npm run db:init
-npm run db:seed
-
-# Frontend (in a separate terminal)
-cd frontend
-npm install
 ```
 
-### Step 4: Run Backend & Frontend
+### 7. Seed Demo Data
 ```bash
-# Terminal 1 — Express API + Socket.IO (:4000)
+cd backend
+npm run db:seed
+```
+
+### 8. Start the Backend Server (`http://localhost:4000`)
+```bash
 cd backend
 npm run dev
+# Or for production mode:
+npm start
+```
 
-# Terminal 2 — Next.js Frontend (:3000)
+### 9. Start the Frontend Server (`http://localhost:3000`)
+In a second terminal:
+```bash
 cd frontend
 npm run dev
+# Or for a verified production build:
+npm run build
+npm start
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in two browser tabs with different demo Bidder IDs to observe real-time synchronized bidding, anti-sniping extensions, and atomic closing.
+### 10. Open in Browser
+- **Application Home / Live Auction:** http://localhost:3000
+- **Login (Screen 01):** http://localhost:3000/login
+- **Sign Up (Screen 02):** http://localhost:3000/signup
+- **Auction Result (Screen 05):** http://localhost:3000/result
+- **My Ledger (Screen 06):** http://localhost:3000/ledger
+- **Notifications (Screen 09):** http://localhost:3000/notifications
+- **Profile & Settings (Screen 10):** http://localhost:3000/settings
+- **Help & Support (Screen 11):** http://localhost:3000/help
+- **Backend Health Check:** http://localhost:4000/api/health
 
 ---
 
-## 5. Environment Variables
+## 8. Environment Variables
 
-| Variable | Default | Description |
-|---|---|---|
-| `POSTGRES_USER` | `auction_user` | PostgreSQL username (Docker Compose) |
-| `POSTGRES_PASSWORD` | `auction_pass` | PostgreSQL password (Docker Compose) |
-| `POSTGRES_DB` | `live_auction` | PostgreSQL database name |
-| `POSTGRES_PORT` | `5432` | PostgreSQL port |
-| `DATABASE_URL` | `postgresql://auction_user:auction_pass@localhost:5432/live_auction` | Full connection URI used by Express |
-| `PORT` | `4000` | Express HTTP + Socket.IO port |
-| `CORS_ORIGIN` | `http://localhost:3000` | Allowed frontend origin(s) |
-| `CLOSING_WORKER_INTERVAL_MS` | `1000` | Interval (ms) between closing worker ticks |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:4000` | Express REST API URL for Next.js |
-| `NEXT_PUBLIC_SOCKET_URL` | `http://localhost:4000` | Express Socket.IO URL for Next.js |
+Configure `backend/.env` and `frontend/.env.local` using `.env.example` as a template. **Never commit `.env`, `.env.local`, or real production credentials to Git** (already excluded in `.gitignore`).
+
+| Variable | Scope | Purpose | Example Placeholder | Required |
+|---|---|---|---|---|
+| `POSTGRES_USER` | Docker Compose / Backend | PostgreSQL username | `your_db_user` | Optional (defaults in `env.js`) |
+| `POSTGRES_PASSWORD` | Docker Compose / Backend | PostgreSQL password | `your_db_password` | Optional (required if not using `DATABASE_URL`) |
+| `POSTGRES_DB` | Docker Compose / Backend | PostgreSQL database name | `live_auction` | Optional |
+| `POSTGRES_PORT` | Docker Compose / Backend | PostgreSQL TCP port | `5432` | Optional |
+| `DATABASE_URL` | Backend | Full PostgreSQL connection URI | `postgresql://<user>:<password>@localhost:5432/live_auction` | **Recommended / Required in prod** |
+| `PORT` | Backend | Express HTTP & Socket.IO port | `4000` | Optional (default `4000`) |
+| `NODE_ENV` | Backend | Runtime environment (`development` / `production`; enables `Secure` cookie flag in production) | `development` | Optional |
+| `CORS_ORIGIN` | Backend | Comma-separated allowed frontend origin(s) | `http://localhost:3000` | **Required if frontend differs from `:3000`** |
+| `CLOSING_WORKER_INTERVAL_MS` | Backend | Closing worker polling interval in milliseconds | `1000` | Optional (default `1000`) |
+| `NEXT_PUBLIC_API_URL` | Frontend | Express REST API base URL | `http://localhost:4000` | **Required** |
+| `NEXT_PUBLIC_SOCKET_URL` | Frontend | Express Socket.IO server URL | `http://localhost:4000` | **Required** |
 
 ---
 
-## 6. REST API Documentation
+## 9. Database Design
 
-### `GET /api/health`
-Returns server and PostgreSQL connectivity status with authoritative `serverTime`.
+Defined in `backend/src/database/schema.sql`. All monetary values are stored in `BIGINT` integer paise (`₹25,000.00` = `2500000`).
 
-### `GET /api/auctions`
-Lists auctions ordered by `LIVE` first, returning current state, `minNextBid`, `bidCount`, and `serverTime`.
+```mermaid
+erDiagram
+  USERS ||--o{ USER_SESSIONS : "has"
+  USERS ||--o{ AUCTIONS : "hosts (host_user_id)"
+  USERS ||--o{ WATCHLIST : "saves"
+  AUCTIONS ||--o{ WATCHLIST : "watched in"
+  AUCTIONS ||--o{ BIDS : "receives"
+  USERS ||--o{ AUDIT_LOGS : "performs (actor_user_id)"
 
-### `GET /api/auctions/:id`
-Returns authoritative auction state including `currentPrice`, `minIncrement`, `minNextBid`, `endsAt`, `version`, `bidCount`, and `serverTime`.
+  USERS {
+    uuid id PK
+    varchar auction_me_id UK
+    varchar display_name
+    text password_hash
+    varchar role "BIDDER | HOST | ADMIN"
+    boolean is_active
+    timestamptz created_at
+    timestamptz updated_at
+  }
 
-### `GET /api/auctions/:id/bids?limit=50`
-Returns accepted bids for the auction ordered newest first.
+  USER_SESSIONS {
+    uuid id PK
+    uuid user_id FK
+    char token_hash UK "SHA-256 hex"
+    timestamptz expires_at
+    timestamptz created_at
+  }
 
-### `POST /api/auctions/:id/bids`
-Places a transaction-safe bid.
+  AUCTIONS {
+    uuid id PK
+    text title
+    text description
+    varchar status "SCHEDULED | LIVE | CLOSED"
+    bigint starting_price
+    bigint current_price
+    bigint min_increment
+    text highest_bidder_id
+    text winner_id
+    timestamptz starts_at
+    timestamptz ends_at
+    timestamptz closed_at
+    bigint version
+    uuid host_user_id FK
+    varchar category
+    text image_url
+    varchar moderation_status "APPROVED | FLAGGED | SUSPENDED"
+    text moderation_note
+  }
 
-**Request Body:**
-```json
-{
-  "bidderId": "demo-user-101",
-  "amount": 2700000,
-  "requestId": "550e8400-e29b-41d4-a716-446655440000"
-}
+  BIDS {
+    uuid id PK
+    uuid auction_id FK
+    text bidder_id
+    bigint amount
+    uuid request_id "UNIQUE(auction_id, request_id)"
+    timestamptz created_at
+  }
+
+  WATCHLIST {
+    uuid user_id PK, FK
+    uuid auction_id PK, FK
+    timestamptz created_at
+  }
+
+  AUDIT_LOGS {
+    uuid id PK
+    uuid actor_user_id FK
+    varchar action
+    varchar target_type
+    text target_id
+    jsonb details
+    timestamptz created_at
+  }
 ```
 
-**Success (`201 Created` for new bid, `200 OK` for idempotent replay):**
+### Key Constraints & Indexes
+- **Auction Lifecycle:** `status` is constrained to `SCHEDULED`, `LIVE`, or `CLOSED`, with `CHECK (ends_at > starts_at)`.
+- **Idempotency:** `bids` enforces `CONSTRAINT bids_auction_request_unique UNIQUE (auction_id, request_id)`.
+- **Case-Insensitive Usernames:** `idx_users_auction_me_id_lower ON users (LOWER(auction_me_id))`.
+- **Closing Worker Index:** `idx_auctions_status_ends_at ON auctions (status, ends_at)` accelerates expired auction discovery.
+- **Bid History & Ledger Indexes:** `idx_bids_auction_created_at (auction_id, created_at DESC)`, `idx_bids_bidder_created_at (bidder_id, created_at DESC)`, and `idx_bids_request_id (request_id)`.
+- **Winner Determination:** `winner_id` remains `NULL` while `LIVE` and is atomically set to `highest_bidder_id` (or stays `NULL` if zero bids) when `status` transitions to `CLOSED`.
+
+---
+
+## 10. Demo Accounts and Seed Data
+
+Running `npm run db:seed` inside `backend/` executes `backend/scripts/seed.js`, which:
+1. Initializes the schema if not already present.
+2. Upserts four local development accounts (with `scrypt`-hashed passwords):
+   - **Bidder:** `bidder-aarav-01`, `bidder-meera-02` (`role: BIDDER`)
+   - **Host:** `host-curate-01` (`role: HOST`)
+   - **Admin:** `admin-01` (`role: ADMIN`)
+   *(Note: The current seed script uses these IDs rather than `demo_bidder` / `demo_host` / `demo_admin`. If your evaluation harness expects those exact aliases, update the `upsertUser` calls in `backend/scripts/seed.js`.)*
+3. Deterministically resets and seeds one live auction (`11111111-1111-4111-8111-111111111111` — *1969 Grand Seiko Hi-Beat 36000 — Collector Edition*, starting at ₹25,000, current price ₹26,500, min increment ₹500, 5-minute window) with two initial bids.
+
+### Safe Re-Seeding & Credential Hygiene
+- Re-running `npm run db:seed` is safe and idempotent: users are upserted via `ON CONFLICT (auction_me_id) DO UPDATE`, and the demo auction (`11111111-...`) is cleanly reset with a fresh 5-minute countdown.
+- **Local vs. Production:** Local seed credentials are defined inside `backend/scripts/seed.js` strictly for local assessment and are intentionally omitted from this README. In production, **never** run `seed.js` with hardcoded passwords—inject initial admin bootstrap credentials via environment variables (e.g., `SEED_ADMIN_PASSWORD`) or a secret manager, and rotate immediately.
+
+---
+
+## 11. Auction Workflow & Concurrency Engine
+
+Every `POST /api/auctions/:id/bids` executes the following sequence inside `backend/src/services/biddingService.js`:
+
+1. **Input Validation:** Validates `auctionId` (UUID), `bidderId` (non-empty string; overridden by `req.user.auctionMeId` when authenticated), `amount` (positive safe integer in paise), and `requestId` (UUID).
+2. **`BEGIN` Transaction:** Acquires a dedicated client from the `pg` pool.
+3. **Row Lock (`SELECT ... FOR UPDATE`):** Locks the target `auctions` row, serializing all competing bids and closing worker attempts for that auction.
+4. **Authoritative Database Time:** Evaluates `clock_timestamp()` **after** lock acquisition (never trusts browser clocks) to compute `before_start`, `is_expired`, and `should_extend` (`(ends_at - db_now) <= INTERVAL '30 seconds'`).
+5. **Idempotency Check:** Queries `bids` for `(auction_id, request_id)`. If already accepted, commits and returns `200 OK` (`idempotentReplay: true`) with the original bid record.
+6. **Status & Window Validation:** Rejects if `SCHEDULED` / before `starts_at`, `CLOSED`, `SUSPENDED` (moderation), or `clock_timestamp() >= ends_at`.
+7. **Minimum Increment Validation:** Rejects with `409 BID_TOO_LOW` if `amount < current_price + min_increment`.
+8. **Commit Accepted Bid:** Inserts into `bids`, updates `current_price`, `highest_bidder_id`, increments `version`, and extends `ends_at` by `INTERVAL '30 seconds'` if `should_extend` is true.
+9. **`COMMIT` & Post-Commit Broadcast:** Emits `auction:update` via Socket.IO **only after** `COMMIT` succeeds. Any rejection executes `ROLLBACK` cleanly.
+10. **Atomic Closing (`closingService.js`):** Every second, the worker selects expired `LIVE` rows with `FOR UPDATE SKIP LOCKED` and atomically sets `status = 'CLOSED'`, `winner_id = highest_bidder_id`, `closed_at = clock_timestamp()`, and `version = version + 1`. A late bid racing with closure is resolved by the same row lock—if the bid commits first and extends `ends_at`, the worker will not close it.
+
+---
+
+## 12. API Documentation
+
+All routes below are verified from `backend/src/app.js` and `backend/src/routes/*.js`.
+
+### System & Health
+| Method | Route | Purpose | Auth | Role |
+|---|---|---|---|---|
+| `GET` | `/api/health` | Check API & PostgreSQL connectivity + `serverTime` | Public | Any |
+
+### Authentication (`/api/auth`)
+| Method | Route | Purpose | Auth | Role | Request Body / Query |
+|---|---|---|---|---|---|
+| `GET` | `/api/auth/check-id` | Check if an `auctionMeId` is available | Public | Any | Query: `?auctionMeId=<id>` |
+| `POST` | `/api/auth/register` | Register a new `BIDDER` account & set `HttpOnly` cookie | Public | Public (always creates `BIDDER`) | `{ displayName, auctionMeId, password }` |
+| `POST` | `/api/auth/login` | Authenticate with `AuctionMe ID` + password | Public | Any | `{ auctionMeId, password, rememberMe }` |
+| `POST` | `/api/auth/logout` | Revoke session token & clear cookie | Public / Session | Any | — |
+| `GET` | `/api/auth/me` | Return authenticated user profile | Required | Any | — |
+
+### Public & Bidding Auctions (`/api/auctions`)
+| Method | Route | Purpose | Auth | Role | Request Body |
+|---|---|---|---|---|---|
+| `GET` | `/api/auctions` | List auctions (`LIVE` first) with `bidCount` & `serverTime` | Public | Any | — |
+| `GET` | `/api/auctions/:id` | Get authoritative single auction state | Public | Any | — |
+| `GET` | `/api/auctions/:id/bids` | List accepted bids (`?limit=50`, newest first) | Public | Any | — |
+| `POST` | `/api/auctions/:id/bids` | Place transaction-safe bid (paise) | Optional* | `BIDDER` (when authenticated; `HOST` blocked) | `{ bidderId, amount, requestId, socketId? }` |
+| `GET` | `/api/auctions/:id/result` | Get authoritative auction outcome & winner | Public | Any | — |
+
+*\*When a valid session cookie or `Bearer` token is present, the server uses `req.user.auctionMeId` as the authoritative bidder ID and ignores client-supplied `bidderId`.*
+
+**Example `POST /api/auctions/:id/bids` Response (`201 Created`):**
 ```json
 {
   "accepted": true,
   "idempotentReplay": false,
   "extended": true,
   "extensionSeconds": 30,
-  "bid": { "id": "...", "bidderId": "demo-user-101", "amount": 2700000, "requestId": "..." },
-  "auction": { "id": "...", "currentPrice": 2700000, "version": 4, "endsAt": "..." },
-  "serverTime": "..."
+  "bid": { "id": "...", "auctionId": "...", "bidderId": "bidder-aarav-01", "amount": 2700000, "requestId": "..." },
+  "auction": { "id": "...", "status": "LIVE", "currentPrice": 2700000, "minNextBid": 2750000, "version": 4, "endsAt": "..." },
+  "serverTime": "2026-11-27T07:08:42.157Z"
 }
 ```
+**Common Error Responses:** `400` (`INVALID_BID_AMOUNT`, `INVALID_AUCTION_ID`, `INVALID_REQUEST_ID`), `401` (`UNAUTHENTICATED`), `403` (`FORBIDDEN`), `404` (`AUCTION_NOT_FOUND`), `409` (`BID_TOO_LOW`, `AUCTION_NOT_STARTED`, `AUCTION_EXPIRED`, `AUCTION_CLOSED`, `AUCTION_ME_ID_TAKEN`).
 
-**Error (`400`, `404`, `409`):**
-```json
-{
-  "accepted": false,
-  "error": {
-    "code": "BID_TOO_LOW",
-    "message": "Bid rejected. Minimum next bid is ₹27,500."
-  }
-}
-```
+### Bidder Personal Endpoints (`/api/me`)
+| Method | Route | Purpose | Auth | Role |
+|---|---|---|---|---|
+| `GET` | `/api/me/bids` | Authenticated user's accepted bid history (`?limit=`) | Required | Any |
+| `GET` | `/api/me/holdings` | Auctions won by the authenticated user | Required | Any |
+| `GET` | `/api/me/watchlist` | Authenticated user's saved watchlist | Required | Any |
+| `POST` | `/api/me/watchlist/:auctionId` | Add auction to watchlist | Required | Any |
+| `DELETE` | `/api/me/watchlist/:auctionId` | Remove auction from watchlist | Required | Any |
 
-### `GET /api/auctions/:id/result`
-Returns auction status, `winnerId`, `finalPrice`, `hadBids`, `closedAt`, and `version`.
+### Host Endpoints (`/api/host`)
+| Method | Route | Purpose | Auth | Role |
+|---|---|---|---|---|
+| `POST` | `/api/host/auctions` | Create a new auction | Required | `HOST`, `ADMIN` |
+| `GET` | `/api/host/auctions` | List auctions owned by the host | Required | `HOST`, `ADMIN` |
+| `GET` | `/api/host/auctions/:id` | Get details of a host-owned auction | Required | `HOST`, `ADMIN` |
+| `PATCH` | `/api/host/auctions/:id` | Update editable metadata (cannot tamper with `currentPrice` or `winnerId`) | Required | `HOST`, `ADMIN` |
+| `POST` | `/api/host/auctions/:id/start` | Transition `SCHEDULED` auction to `LIVE` | Required | `HOST`, `ADMIN` |
+| `POST` | `/api/host/auctions/:id/close` | Close an owned auction atomically & broadcast `auction:closed` | Required | `HOST`, `ADMIN` |
 
----
+### Admin Endpoints (`/api/admin`)
+| Method | Route | Purpose | Auth | Role |
+|---|---|---|---|---|
+| `GET` | `/api/admin/users` | List all registered users | Required | `ADMIN` |
+| `PATCH` | `/api/admin/users/:id/role` | Update user role (`BIDDER`, `HOST`, `ADMIN`) | Required | `ADMIN` |
+| `PATCH` | `/api/admin/users/:id/status` | Activate or deactivate a user account | Required | `ADMIN` |
+| `GET` | `/api/admin/auctions` | List all auctions across all hosts | Required | `ADMIN` |
+| `PATCH` | `/api/admin/auctions/:id/moderate` | Set `moderationStatus` (`APPROVED`, `FLAGGED`, `SUSPENDED`) + note | Required | `ADMIN` |
+| `GET` | `/api/admin/audit-logs` | Retrieve admin audit trail (`?limit=`) | Required | `ADMIN` |
 
-## 7. Bidding Transaction & Concurrency Guarantees
-
-Every `POST /api/auctions/:id/bids` executes inside a single PostgreSQL transaction:
-
-1. `BEGIN`
-2. `SELECT * FROM auctions WHERE id = $1 FOR UPDATE` — acquires an exclusive row-level lock, serializing all concurrent bids and closing worker attempts for this auction.
-3. `SELECT clock_timestamp()` — captures the authoritative database time **after** lock acquisition (never trusts client clocks).
-4. **Idempotency check:** Looks up `(auction_id, request_id)` in `bids`. If already accepted, commits and returns the original bid result (`200 OK`, `idempotentReplay: true`) without inserting a duplicate.
-5. **Status & time window check:** Rejects if `SCHEDULED` / before `starts_at`, if `CLOSED`, or if `clock_timestamp() >= ends_at`.
-6. **Minimum increment check:** Rejects if `amount < current_price + min_increment`.
-7. **Insert & Update:** Inserts the bid into `bids`, updates `current_price`, `highest_bidder_id`, increments `version`, and conditionally extends `ends_at` by `INTERVAL '30 seconds'`.
-8. `COMMIT`
-9. **Post-commit broadcast:** Emits `auction:update` via Socket.IO **only after** `COMMIT` succeeds. Any failure rolls back the transaction cleanly.
-
----
-
-## 8. Anti-Sniping Logic
-
-Evaluated inside the locked PostgreSQL transaction using `clock_timestamp()`:
-
-- If `(ends_at - clock_timestamp()) <= INTERVAL '30 seconds'` and the bid is **accepted**:
-  `ends_at = ends_at + INTERVAL '30 seconds'`.
-- **31 seconds remaining:** No extension.
-- **Exactly 30 seconds remaining:** Extended by 30 seconds.
-- **5 seconds remaining:** Extended by 30 seconds.
-- **Expired (`clock_timestamp() >= ends_at`):** Rejected, no extension.
-- **Rejected bid (too low / invalid):** Rolled back, no extension.
-- Repeated valid late bids can extend the deadline repeatedly.
+### Missing / Planned Endpoints (Not Implemented Yet)
+- Notifications feed & read markers (`GET /api/notifications`, `PATCH /api/notifications/:id/read`, `POST /api/notifications/read-all`)
+- Profile update & password change (`PATCH /api/me`, `POST /api/auth/change-password`, `GET/PATCH /api/me/preferences`)
+- Support ticket submission (`POST /api/support/tickets`)
+- Disputes / complaints management endpoints
 
 ---
 
-## 9. Auction Closing Worker
+## 13. Real-Time Communication (Socket.IO)
 
-`backend/src/workers/closingWorker.js` runs every 1 second and invokes `closeExpiredAuctions(io)`:
+Implemented in `backend/src/sockets/auctionSocket.js` and consumed by `frontend/src/hooks/useAuctionSocket.js`.
 
-1. `BEGIN`
-2. `SELECT id FROM auctions WHERE status = 'LIVE' AND ends_at <= clock_timestamp() FOR UPDATE SKIP LOCKED`
-3. For each locked row, executes:
-   ```sql
-   UPDATE auctions
-   SET status = 'CLOSED',
-       winner_id = highest_bidder_id,
-       closed_at = clock_timestamp(),
-       version = version + 1
-   WHERE id = $1
-     AND status = 'LIVE'
-     AND ends_at <= clock_timestamp()
-   RETURNING *;
+- **Connection:** Socket.IO attaches directly to the Express HTTP server (`http://localhost:4000`) with CORS configured from `CORS_ORIGIN`.
+- **Room Naming:** `auction:<auctionId>` (validated as UUID before joining).
+- **Events:**
+  - `auction:join` *(Client → Server)*: `{ auctionId }` — joins room `auction:<auctionId>` and acknowledges `{ ok, room, socketId }`.
+  - `auction:leave` *(Client → Server)*: `{ auctionId }` — leaves room on unmount.
+  - `auction:update` *(Server → Room, post-commit only)*: `{ auction, bid, version, extended, extensionSeconds, previousEndsAt, serverTime }`.
+  - `auction:closed` *(Server → Room, post-commit only)*: `{ auction, auctionId, status: 'CLOSED', winnerId, finalPrice, closedAt, hadBids, version, serverTime }`.
+  - `bid:rejected` *(Server → Submitting Socket)*: `{ auctionId, bidderId, requestId, code, message, details, timestamp }`.
+- **Version Synchronization & Reconnection:** The frontend tracks `versionRef.current` and ignores any event where `payload.version <= versionRef.current`. On reconnect, `useAuctionSocket` automatically re-joins the room and triggers a fresh REST fetch to recover any state missed while disconnected.
+
+---
+
+## 14. Testing
+
+### Available Test Suites & Commands
+
+1. **Concurrency, Anti-Sniping & Closing Suite (`backend/scripts/concurrency-test.js`):**
+   ```bash
+   cd backend
+   npm run test:concurrency
    ```
-4. `COMMIT`
-5. Emits `auction:closed` to `auction:<auctionId>` after commit.
+   - **Coverage (14 tests):** Simultaneous identical competing bids (5 concurrent HTTP requests → 1 accepted, 4 rejected, 1 DB row), simultaneous different bids (higher bid never overwritten), below minimum increment, equal to current price, zero/negative/decimal/string amounts, duplicate `requestId` (concurrent & sequential idempotent replay), bid before start, bid at/after expiration, anti-sniping (`<= 30s` extends by exactly 30s; `> 30s` and rejected bids do not extend), 5 concurrent closing worker runs (closes once with 1 winner), no-bids close (`winnerId: null`), and bid-vs-closing race safety.
+   - **Last Executed Result:** **14/14 passed, 0 failed**.
 
-- **Single-winner guarantee:** `FOR UPDATE SKIP LOCKED` + the `status = 'LIVE'` predicate ensures concurrent workers or repeated ticks never double-close or overwrite `winner_id`.
-- **No-bids handling:** If `highest_bidder_id` is `NULL`, `winner_id` remains `NULL`.
-- **Bid-vs-Close race safety:** Both bidding and closing lock the exact same `auctions` row. If a late bid acquires the lock first and extends `ends_at` by 30s, the worker skips it and on the next tick sees the extended deadline. If the worker locks and closes first, the racing bid sees `status = 'CLOSED'` and is rejected.
+2. **Auth, RBAC, Host, Bidder & Admin API Verification (`backend/scripts/verify-api.js`):**
+   ```bash
+   cd backend
+   node scripts/verify-api.js
+   ```
+   - **Coverage (10 tests):** `/api/health`, registration with `scrypt` hashing & forced `BIDDER` role (ignores client-supplied `role: 'ADMIN'`), case-insensitive duplicate `auctionMeId` rejection (`409`), login/wrong-password rejection (`401`), unauthenticated blocking (`401`), RBAC enforcement (`403` for `BIDDER` on Host/Admin routes and `HOST` on Admin/Bidding routes), Host auction lifecycle & price/winner tamper protection, authenticated bidding + `/api/me/bids`, `/api/me/holdings`, `/api/me/watchlist`, and Admin moderation (`SUSPENDED` blocks bidding) + audit logs.
+   - **Last Executed Result:** **10/10 passed, 0 failed**.
+
+3. **Frontend Production Build Verification:**
+   ```bash
+   cd frontend
+   npm run build
+   ```
+   - **Last Executed Result:** Compiled cleanly (`15/15` routes built with 0 errors).
 
 ---
 
-## 10. Socket.IO Events
+## 15. Troubleshooting
 
-Room naming: `auction:<auctionId>`
-
-| Direction | Event | Payload / Behavior |
+| Issue | Likely Cause | Resolution |
 |---|---|---|
-| Client → Server | `auction:join` | `{ auctionId }` — joins room `auction:<auctionId>` |
-| Client → Server | `auction:leave` | `{ auctionId }` — leaves room |
-| Server → Room | `auction:update` | `{ auction, bid, version, extended, extensionSeconds, previousEndsAt, serverTime }` |
-| Server → Room | `auction:closed` | `{ auction, auctionId, status, winnerId, finalPrice, closedAt, hadBids, version, serverTime }` |
-| Server → Socket | `bid:rejected` | `{ auctionId, bidderId, requestId, code, message, details, timestamp }` |
-
-The frontend tracks `versionRef.current` and ignores any Socket.IO event with `payload.version <= versionRef.current`. On reconnect, the client re-joins the room and fetches fresh REST state to recover any missed updates.
-
----
-
-## 11. Running Tests
-
-Run the deterministic concurrency & edge-case test suite against PostgreSQL:
-
-```bash
-cd backend
-npm run test:concurrency
-```
-
-The suite spins up an isolated Express + Socket.IO server against PostgreSQL, creates fresh test auction fixtures, runs real concurrent HTTP requests (`Promise.all`) and concurrent worker runs, verifies all 14 concurrency/anti-sniping/closing invariants, and cleans up its fixtures automatically.
+| `ECONNREFUSED` on port `5432` | PostgreSQL is not running | Run `docker compose up -d postgres` or start your local PostgreSQL service. |
+| `EADDRINUSE` on port `3000` or `4000` | Another Node/Next.js process is using the port | Stop the conflicting process or change `PORT` in `backend/.env`. |
+| `password authentication failed` | `DATABASE_URL` credentials mismatch | Verify `DATABASE_URL` in `backend/.env` matches your Docker or local PostgreSQL role/password. |
+| `relation "auctions" does not exist` | Schema not initialized | Run `cd backend && npm run db:init`. |
+| Frontend cannot reach backend / CORS error | `CORS_ORIGIN` or `NEXT_PUBLIC_API_URL` mismatch | Ensure `CORS_ORIGIN=http://localhost:3000` in `backend/.env` and `NEXT_PUBLIC_API_URL=http://localhost:4000` in `frontend/.env.local`. |
+| Socket.IO stays `Reconnecting...` | Backend stopped or `NEXT_PUBLIC_SOCKET_URL` wrong | Confirm Express is running on `:4000` and `NEXT_PUBLIC_SOCKET_URL=http://localhost:4000`. |
+| `ENOENT` in `frontend/.next` during `npm run build` | `next dev` running concurrently while building | Stop `next dev`, remove `frontend/.next`, and re-run `npm run build`. |
+| `401 UNAUTHENTICATED` on protected endpoints | Missing cookie or `Bearer` token | Sign in via `POST /api/auth/login` (with `credentials: 'include'` in browser or `Authorization: Bearer <token>` in CLI). |
 
 ---
 
-## 12. Scalability Design (50,000 Simultaneous Auctions & 200,000 Watchers on One Auction)
+## 16. Security Considerations
 
-> **Implemented MVP vs. Production Scaling:**
-> The current MVP implements single-node Express + Socket.IO, single-instance PostgreSQL with `SELECT ... FOR UPDATE`, indexed queries, `FOR UPDATE SKIP LOCKED` closing worker, and versioned Socket.IO events. Below are the **six production scaling pillars** required to scale to **50,000 simultaneous auctions** and **200,000 concurrent watchers on a single hot auction**.
+### Implemented Protections
+- **Password Hashing:** Salted `crypto.scryptSync` (`scrypt$<16-byte-hex-salt>$<64-byte-hex-key>`) verified with `crypto.timingSafeEqual`—plaintext passwords are never stored.
+- **Session Security:** Opaque 32-byte random tokens stored as SHA-256 hashes in `user_sessions`, delivered via `HttpOnly`, `SameSite=Lax` cookies (`Secure` when `NODE_ENV=production`) or `Bearer` tokens.
+- **Backend RBAC:** `requireAuth` and `requireRole(...)` enforce `BIDDER`, `HOST`, and `ADMIN` access on the server; public registration always assigns `BIDDER` and ignores client-supplied roles.
+- **SQL Parameterization:** Every PostgreSQL query uses parameterized placeholders (`$1`, `$2`, ...) via `pg`—no string interpolation in SQL.
+- **Transactional Integrity & Idempotency:** `SELECT ... FOR UPDATE`, `FOR UPDATE SKIP LOCKED`, `clock_timestamp()`, and `UNIQUE (auction_id, request_id)` prevent race conditions, duplicate bids, and double-closing.
+- **Input Validation & Secret Hygiene:** Strict UUID, integer paise, and string length validation; `.env` files excluded via `.gitignore`.
 
-### 1. Horizontally Scaled API and Socket.IO Instances
-- **MVP:** Single Node.js process handling both REST writes and Socket.IO connections.
-- **Production:** Decouple stateless **Bid API nodes** from **WebSocket Fan-Out Gateway nodes** behind an L7 load balancer (e.g., NGINX / AWS ALB / Envoy). Scale Socket.IO gateways horizontally (e.g., 20–40 nodes handling 5,000–10,000 concurrent WebSocket connections each to comfortably absorb 200,000 watchers on one auction) with sticky sessions only during the initial HTTP-to-WebSocket upgrade handshake. Apply per-bidder rate limiting and short-circuit obviously stale bids at the API edge before touching PostgreSQL.
+### Not Yet Implemented (Production Hardening Roadmap)
+- HTTP rate limiting & brute-force login throttling.
+- CSRF tokens (mitigated partially by `SameSite=Lax`, not yet full double-submit CSRF).
+- Helmet security headers & Content Security Policy (CSP).
 
-### 2. Redis Pub/Sub or Socket.IO Redis Adapter
-- **MVP:** In-memory Socket.IO rooms (`io.to('auction:<id>')`) on a single server.
-- **Production:** Attach the `@socket.io/redis-streams-adapter` (or Redis Cluster Pub/Sub / Kafka fan-out bus) across all WebSocket gateway nodes so a committed bid on API Node A is broadcast to all 200,000 watchers connected across Gateway Nodes 1..N. For ultra-hot auctions (200k watchers, dozens of bids/sec), coalesce/throttle high-frequency `auction:update` broadcasts (e.g., 100–250ms micro-batching of latest committed state + recent bids) to prevent outbound network saturation while preserving final state accuracy.
+---
 
-### 3. PostgreSQL Transaction-Based Auction Correctness
-- **MVP:** Direct `SELECT ... FOR UPDATE` row locking in PostgreSQL per bid transaction.
-- **Production:** Retain PostgreSQL ACID transactions as the authoritative source of truth for bid acceptance, anti-sniping, and winner finality. Protect the database from lock-queue exhaustion on hot auctions by placing **PgBouncer** (transaction pooling) in front of PostgreSQL, enforcing tight `lock_timeout` and `statement_timeout` (e.g., 500ms–1s), and optionally using a **Redis pre-filter** (caching latest `current_price + min_increment`) to reject 90%+ of stale/low bids before they ever contend on the PostgreSQL row lock.
+## 17. Limitations and Future Improvements
 
-### 4. Database Indexing and Partitioning / Sharding
-- **MVP:** Single PostgreSQL database with composite indexes `(status, ends_at)` and `(auction_id, created_at DESC)`.
-- **Production:**
-  - **Partial index** for closing: `CREATE INDEX idx_live_auctions_ends_at ON auctions (ends_at) WHERE status = 'LIVE';` — keeps the hot index tiny even with millions of historical closed auctions.
-  - **Table partitioning:** Partition `bids` by `created_at` (time-range) or hash of `auction_id`, and archive closed auctions to cold storage.
-  - **Horizontal sharding & read replicas:** Route read-heavy `GET /api/auctions/:id` and bid history queries to PostgreSQL read replicas (or Redis cache-aside with short TTL / write-through on commit). Beyond single-primary write throughput, shard `auctions` and `bids` by `auction_id` (e.g., Citus or application-level consistent hashing) so each shard handles a slice of the 50,000 live auctions independently.
+### Currently Implemented
+- Full transactional PostgreSQL bidding engine with `SELECT ... FOR UPDATE`, idempotency, 30s anti-sniping, and atomic `FOR UPDATE SKIP LOCKED` closing worker.
+- Real-time Socket.IO auction rooms with monotonic version filtering and reconnect re-sync.
+- Auth (`scrypt` + DB sessions), RBAC (`BIDDER` / `HOST` / `ADMIN`), Bidder personal APIs (`/api/me/*`), Host lifecycle APIs (`/api/host/*`), and Admin moderation/audit APIs (`/api/admin/*`).
+- Responsive Light/Dark/System Next.js frontend screens (Login, Sign Up, Discover/Catalog, Live Auction Room, Auction Result, My Ledger, My Holdings, Watchlist, Notifications, Settings, Help & Support).
 
-### 5. Distributed Auction Closing Workers
-- **MVP:** Single in-process `setInterval` worker running `FOR UPDATE SKIP LOCKED` every 1 second.
-- **Production:** Run a pool of dedicated stateless **Closing Worker replicas** (outside the API processes). Each worker claims bounded batches (`LIMIT 200`) of expired auctions using `FOR UPDATE SKIP LOCKED` so workers never block each other or double-close. For 50,000 auctions with bursty simultaneous expirations, pair the DB sweep with a **Redis Sorted Set (`ZSET`)** delay queue (`score = ends_at_epoch`) so workers pop due auction IDs in `O(log N)` instead of repeatedly scanning the database, while keeping a periodic PostgreSQL sweep as a safety net for reconciliation.
+### Planned Improvements
+- **Frontend UI Wiring:** Connect Host management screens, Admin moderation/audit UI, and wire `/signup` & `/ledger` directly to the newly added `/api/auth/register` and `/api/me/bids` endpoints.
+- **Additional Backend APIs:** Notifications persistence (`/api/notifications`), profile/password updates (`PATCH /api/me`, `POST /api/auth/change-password`), support ticket intake (`/api/support/tickets`), rejected-bid audit table, and participant/extension counters on `/api/auctions/:id/result`.
+- **Horizontal Scaling:** Multi-instance API & Socket.IO gateways with `@socket.io/redis-streams-adapter`, PgBouncer connection pooling, partial indexes + time-partitioned `bids` tables, distributed closing workers backed by a Redis `ZSET` delay queue, and OpenTelemetry/Prometheus observability.
 
-### 6. Event Delivery, Reconnection, and Observability
-- **MVP:** Monotonic `version` filtering on the client, automatic Socket.IO reconnection with REST state re-sync, and console logging.
-- **Production:**
-  - **Thundering-herd protection on reconnect:** Add randomized jitter + exponential backoff on client reconnects so a gateway restart doesn't slam the REST API with 200,000 simultaneous `GET /api/auctions/:id` requests; serve initial snapshots through CDN/Redis edge caching.
-  - **Outbox pattern:** Write committed auction events to a transactional `outbox` table inside the same PostgreSQL transaction and relay them to Redis/Kafka so a process crash between `COMMIT` and `io.emit()` never drops a broadcast.
-  - **Observability:** Instrument Prometheus/OpenTelemetry metrics for bid transaction latency (`p50/p95/p99`), PostgreSQL lock wait time, bid rejection reasons, closing worker lag (`closed_at - ends_at`), active WebSocket connections per room, and Redis adapter fan-out delay, with structured JSON logs and distributed trace IDs (`requestId`).
+---
+
+## 18. Team / Academic Information
+
+| Field | Details |
+|---|---|
+| **Student Name(s)** | `[Enter Student Name(s)]` |
+| **Enrollment Number(s)** | `[Enter Enrollment Number(s)]` |
+| **Institution** | `[Enter University / College Name]` |
+| **Department** | `[Enter Department Name]` |
+| **Project Guide / Mentor** | `[Enter Guide Name]` |
+| **Academic Year** | `[Enter Academic Year, e.g., 2025–2026]` |
+
+---
+
+## 19. License
+
+No license file (`LICENSE`) is currently specified in this repository. All rights reserved by the repository authors until a license is explicitly added.

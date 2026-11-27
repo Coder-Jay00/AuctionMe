@@ -9,6 +9,7 @@ import LedgerSummaryCards from './LedgerSummaryCards';
 import BidDetailsDrawer from './BidDetailsDrawer';
 import LedgerMobileNav from './LedgerMobileNav';
 import { useThemePreference } from '../../hooks/useThemePreference';
+import { fetchMyBids } from '../../services/api';
 import { formatINR } from '../../utils/formatters';
 import {
   buildLedgerCsv,
@@ -71,6 +72,7 @@ export default function LedgerScreen() {
   const { preference, setPreference } = useThemePreference();
 
   const [records, setRecords] = useState([]);
+  const [authenticatedBidderId, setAuthenticatedBidderId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -86,29 +88,25 @@ export default function LedgerScreen() {
     setError(null);
 
     try {
-      // Verify backend connectivity first; do NOT expose all users' bids
-      // or fabricate personal ledger data when no personal ledger endpoint exists.
-      const healthRes = await fetch(`${API_BASE}/api/health`, {
-        cache: 'no-store',
-      });
-      if (!healthRes.ok) {
-        throw new Error('Unable to reach the AuctionMe backend API.');
-      }
-
-      // Backend inspection confirmed there is no authenticated personal bidder
-      // ledger endpoint yet (e.g. GET /api/me/bids). Surface this gap honestly.
-      setRecords([]);
-      setError({
-        code: 'LEDGER_ENDPOINT_MISSING',
-        message:
-          'Personal bidder ledger endpoint is not yet implemented on the backend. Sign-in authentication and a bidder-scoped bid history API (including rejected/outbid statuses) are required before personal records can be loaded.',
-      });
+      const data = await fetchMyBids(200);
+      setAuthenticatedBidderId(data?.bidderId || null);
+      setRecords(Array.isArray(data?.bids) ? data.bids : []);
     } catch (err) {
+      setAuthenticatedBidderId(null);
       setRecords([]);
-      setError({
-        code: 'API_ERROR',
-        message: err.message || 'Unable to load your ledger. Please check your connection and try again.',
-      });
+      if (err?.status === 401 || err?.status === 403) {
+        setError({
+          code: 'UNAUTHENTICATED',
+          message: 'Sign in with your AuctionMe account to view your personal bid ledger.',
+        });
+      } else {
+        setError({
+          code: 'API_ERROR',
+          message:
+            err?.message ||
+            'Unable to load your ledger. Please check your connection and try again.',
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -165,7 +163,7 @@ export default function LedgerScreen() {
   return (
     <div className="flex min-h-screen w-full bg-auctionme-lightBg pb-16 text-slate-900 transition-colors duration-200 sm:pb-0 dark:bg-auctionme-darkBg dark:text-slate-100">
       {/* Desktop Left Sidebar */}
-      <ResultSidebar currentBidderId="Not signed in" />
+      <ResultSidebar currentBidderId={authenticatedBidderId || 'Not signed in'} />
 
       {/* Main Column */}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -333,13 +331,22 @@ export default function LedgerScreen() {
                   {error.message}
                 </p>
                 <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
-                  <button
-                    type="button"
-                    onClick={loadPersonalLedger}
-                    className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-rose-500"
-                  >
-                    Retry
-                  </button>
+                  {error.code === 'UNAUTHENTICATED' ? (
+                    <Link
+                      href="/login"
+                      className="rounded-lg bg-auctionme-emeraldLight px-4 py-2 text-xs font-semibold text-white transition hover:bg-auctionme-emeraldLightHover dark:bg-auctionme-emeraldDark dark:text-[#061b12]"
+                    >
+                      Sign In
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={loadPersonalLedger}
+                      className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-rose-500"
+                    >
+                      Retry
+                    </button>
+                  )}
                   <Link
                     href="/"
                     className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-transparent dark:text-slate-200 dark:hover:bg-slate-800"

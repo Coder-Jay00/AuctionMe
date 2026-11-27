@@ -2,7 +2,7 @@ import AdminOverviewView from '../../components/admin/AdminOverviewView';
 
 export const metadata = {
   title: 'Admin Overview — AuctionMe',
-  description: 'Platform health, live metrics, and server-recorded activity for administrators.',
+  description: 'Platform health, live auction volume, and server-recorded activity.',
 };
 
 export default function AdminOverviewPage() {

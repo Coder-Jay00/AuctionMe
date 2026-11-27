@@ -1,8 +1,8 @@
 import AdminComplaintsView from '../../../components/admin/AdminComplaintsView';
 
 export const metadata = {
-  title: 'Complaints & Disputes — Admin Panel — AuctionMe',
-  description: 'Handle user complaints and auction disputes on AuctionMe.',
+  title: 'Complaints & Disputes — AuctionMe Admin',
+  description: 'Administrator complaints and disputes triage queue.',
 };
 
 export default function AdminComplaintsPage() {

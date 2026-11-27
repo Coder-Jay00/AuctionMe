@@ -1,8 +1,8 @@
 import HostAuctionsView from '../../../components/host/HostAuctionsView';
 
 export const metadata = {
-  title: 'My Auctions — Host Panel — AuctionMe',
-  description: 'Manage live, upcoming, and completed auctions on AuctionMe.',
+  title: 'My Auctions — AuctionMe Host',
+  description: 'Manage auctions, filter by status, and inspect permitted lot details.',
 };
 
 export default function HostAuctionsPage() {

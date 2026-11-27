@@ -2,7 +2,7 @@ import HostCreateAuctionView from '../../../components/host/HostCreateAuctionVie
 
 export const metadata = {
   title: 'Create Auction — Host Panel — AuctionMe',
-  description: 'Multi-step auction creation workflow for AuctionMe Hosts.',
+  description: 'Multi-step auction creation workflow on AuctionMe.',
 };
 
 export default function HostCreateAuctionPage() {

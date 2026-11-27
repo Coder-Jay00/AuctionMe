@@ -2,11 +2,10 @@ import HostLiveMonitorView from '../../../components/host/HostLiveMonitorView';
 
 export const metadata = {
   title: 'Live Auction Monitor — Host Panel — AuctionMe',
-  description: 'Read-only real-time Socket.IO live auction monitor for Hosts.',
+  description: 'Read-only real-time Socket.IO live auction monitoring for hosts.',
 };
 
-export default async function HostMonitorPage({ searchParams }) {
+export default async function HostLiveMonitorPage({ searchParams }) {
   const resolved = await searchParams;
-  const auctionId = typeof resolved?.auctionId === 'string' ? resolved.auctionId : null;
-  return <HostLiveMonitorView initialAuctionId={auctionId} />;
+  return <HostLiveMonitorView initialAuctionId={resolved?.auctionId || null} />;
 }

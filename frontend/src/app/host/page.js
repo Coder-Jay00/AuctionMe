@@ -2,7 +2,7 @@ import HostOverviewView from '../../components/host/HostOverviewView';
 
 export const metadata = {
   title: 'Host Overview — AuctionMe',
-  description: 'Host Control Room with live auction metrics, activity chart, and recent lots.',
+  description: 'Host control room for tracking live, upcoming, and completed auctions on AuctionMe.',
 };
 
 export default function HostOverviewPage() {

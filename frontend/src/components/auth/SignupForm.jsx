@@ -102,15 +102,18 @@ export default function SignupForm() {
 
     setFormStatus('loading');
     try {
-      await registerWithAuctionMeId({
+      const data = await registerWithAuctionMeId({
         displayName,
         auctionMeId,
         password,
       });
       setFormStatus('success');
+      const role = data?.user?.role || 'BIDDER';
+      const destination =
+        role === 'ADMIN' ? '/admin' : role === 'HOST' ? '/host' : '/discover';
       setTimeout(() => {
-        router.push('/auctions');
-      }, 900);
+        router.replace(destination);
+      }, 700);
     } catch (err) {
       setFormStatus('error');
       setApiError(

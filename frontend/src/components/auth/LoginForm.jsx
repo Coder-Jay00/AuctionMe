@@ -6,6 +6,7 @@ import Link from 'next/link';
 import AuthInputField from './AuthInputField';
 import AuthStatusAlert from './AuthStatusAlert';
 import { loginWithAuctionMeId } from '../../services/authApi';
+import { resolvePostLoginDestination } from '../../utils/roleRouting';
 
 export default function LoginForm() {
   const router = useRouter();
@@ -48,18 +49,27 @@ export default function LoginForm() {
     setFormStatus('loading');
 
     try {
-      await loginWithAuctionMeId({
+      const data = await loginWithAuctionMeId({
         auctionMeId,
         password,
         rememberMe,
       });
 
-      // Only reached when a real backend authentication endpoint returns 2xx
+      const nextParam =
+        typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search).get('next')
+          : null;
+      const destination = resolvePostLoginDestination(
+        data?.user?.role,
+        nextParam
+      );
+
+      // Only reached when the real backend authentication endpoint returns 2xx
       setFormStatus('success');
       setAlertMessage('Login successful. Redirecting...');
       setTimeout(() => {
-        router.push('/');
-      }, 900);
+        router.replace(destination);
+      }, 600);
     } catch (err) {
       if (err.code === 'INVALID_CREDENTIALS') {
         setFormStatus('error');
@@ -182,7 +192,7 @@ export default function LoginForm() {
         }
       />
 
-      {/* Remember Me & Forgot Password */}
+      {/* Keep Me Signed In */}
       <div className="flex items-center justify-between pt-0.5">
         <label className="inline-flex cursor-pointer items-center gap-2 select-none">
           <input
@@ -196,18 +206,6 @@ export default function LoginForm() {
             Keep me signed in
           </span>
         </label>
-
-        <button
-          type="button"
-          onClick={() =>
-            setInfoNote(
-              'Password recovery is not yet wired to a backend endpoint.'
-            )
-          }
-          className="text-xs font-medium text-auctionme-emeraldLight transition hover:underline dark:text-auctionme-emeraldDark"
-        >
-          Forgot password?
-        </button>
       </div>
 
       {/* Form-Level Status Alert (Server Unavailable / Auth Missing / Success) */}

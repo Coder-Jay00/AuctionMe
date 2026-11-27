@@ -1,9 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AuctionMeLogo from '../auth/AuctionMeLogo';
 import ThemeSegmentedControl from '../auth/ThemeSegmentedControl';
+import { fetchCurrentUser, logoutSession } from '../../services/authApi';
+import { getDashboardPathForRole } from '../../utils/roleRouting';
 
 const HOST_NAV = [
   {
@@ -146,11 +149,47 @@ export default function PortalShell({
   headerRight = null,
   children,
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+  const [authUser, setAuthUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const isAdmin = role === 'admin';
   const navItems = isAdmin ? ADMIN_NAV : HOST_NAV;
+
+  useEffect(() => {
+    let active = true;
+    fetchCurrentUser().then((user) => {
+      if (!active) return;
+      if (!user) {
+        const nextUrl = pathname ? `?next=${encodeURIComponent(pathname)}` : '';
+        router.replace(`/login${nextUrl}`);
+        return;
+      }
+      const userRole = String(user.role || '').toUpperCase();
+      const allowed = isAdmin
+        ? userRole === 'ADMIN'
+        : userRole === 'HOST' || userRole === 'ADMIN';
+      if (!allowed) {
+        router.replace(getDashboardPathForRole(userRole));
+        return;
+      }
+      setAuthUser(user);
+      setAuthChecked(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [isAdmin, pathname, router]);
+
+  const handleSignOut = async () => {
+    setLoggingOut(true);
+    await logoutSession();
+    router.replace('/login');
+  };
 
   const badgeCls = isAdmin
     ? 'border-purple-500/35 bg-purple-500/12 text-purple-700 dark:border-purple-400/35 dark:bg-purple-500/15 dark:text-purple-300'
@@ -193,41 +232,35 @@ export default function PortalShell({
         );
       })}
 
-      {/* Quick Portal Switcher */}
-      <div className="pt-4">
-        <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-          Portals
-        </p>
-        <div className="space-y-1">
-          <Link
-            href="/auctions"
-            onClick={() => setDrawerOpen(false)}
-            className="flex items-center justify-between rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-white"
-          >
-            <span>Bidder Floor</span>
-            <span aria-hidden="true">↗</span>
-          </Link>
-          {isAdmin ? (
-            <Link
-              href="/host"
-              onClick={() => setDrawerOpen(false)}
-              className="flex items-center justify-between rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-white"
-            >
-              <span>Host Panel</span>
-              <span aria-hidden="true">↗</span>
-            </Link>
-          ) : (
-            <Link
-              href="/admin"
-              onClick={() => setDrawerOpen(false)}
-              className="flex items-center justify-between rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-white"
-            >
-              <span>Admin Panel</span>
-              <span aria-hidden="true">↗</span>
-            </Link>
-          )}
+      {/* Role-scoped Navigation Links (no unauthorized cross-role links) */}
+      {authUser?.role === 'ADMIN' && (
+        <div className="pt-4">
+          <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+            Authorized Portals
+          </p>
+          <div className="space-y-1">
+            {isAdmin ? (
+              <Link
+                href="/host"
+                onClick={() => setDrawerOpen(false)}
+                className="flex items-center justify-between rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-white"
+              >
+                <span>Host Panel</span>
+                <span aria-hidden="true">↗</span>
+              </Link>
+            ) : (
+              <Link
+                href="/admin"
+                onClick={() => setDrawerOpen(false)}
+                className="flex items-center justify-between rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-white"
+              >
+                <span>Admin Panel</span>
+                <span aria-hidden="true">↗</span>
+              </Link>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </nav>
   );
 
@@ -249,25 +282,37 @@ export default function PortalShell({
           </div>
           <div className="min-w-0">
             <p className="truncate font-mono text-xs font-semibold text-slate-900 dark:text-white">
-              Unauthenticated
+              {authUser?.auctionMeId || 'Verifying...'}
             </p>
-            <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
-              {isAdmin ? 'Admin RBAC Pending' : 'Host RBAC Pending'}
+            <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              {authUser?.role || (isAdmin ? 'ADMIN' : 'HOST')}
             </p>
           </div>
         </div>
-        <Link
-          href="/login"
-          title="Sign in"
-          className="rounded-lg p-1.5 text-slate-500 transition hover:bg-slate-200/80 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+        <button
+          type="button"
+          onClick={handleSignOut}
+          disabled={loggingOut}
+          title="Sign out"
+          aria-label="Sign out"
+          className="rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-rose-500/10 hover:text-rose-600 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-rose-500/15 dark:hover:text-rose-300"
         >
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-4 w-4">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8 5l5 5-5 5" />
-          </svg>
-        </Link>
+          {loggingOut ? '...' : 'Sign Out'}
+        </button>
       </div>
     </div>
   );
+
+  if (!authChecked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-auctionme-lightBg text-slate-600 dark:bg-auctionme-darkBg dark:text-slate-300">
+        <div className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-medium shadow-sm dark:border-slate-800 dark:bg-auctionme-darkPanel">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-auctionme-emeraldLight border-t-transparent dark:border-auctionme-emeraldDark" />
+          <span>Verifying session and role authorization...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-auctionme-lightBg text-slate-900 transition-colors duration-200 dark:bg-auctionme-darkBg dark:text-slate-100">

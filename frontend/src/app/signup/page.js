@@ -1,13 +1,30 @@
 'use client';
 
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import AuctionMeLogo from '../../components/auth/AuctionMeLogo';
 import LoginHeroPanel from '../../components/auth/LoginHeroPanel';
 import SignupForm from '../../components/auth/SignupForm';
 import ThemeSegmentedControl from '../../components/auth/ThemeSegmentedControl';
 import { useThemePreference } from '../../hooks/useThemePreference';
+import { fetchCurrentUser } from '../../services/authApi';
+import { getDashboardPathForRole } from '../../utils/roleRouting';
 
 export default function SignupPage() {
+  const router = useRouter();
   const { preference, setPreference } = useThemePreference();
+
+  useEffect(() => {
+    let active = true;
+    fetchCurrentUser().then((user) => {
+      if (active && user?.role) {
+        router.replace(getDashboardPathForRole(user.role));
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [router]);
 
   return (
     <div className="relative flex min-h-screen w-full bg-auctionme-lightBg text-slate-900 transition-colors duration-200 dark:bg-auctionme-darkBg dark:text-slate-100">

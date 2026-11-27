@@ -84,6 +84,14 @@ export async function removeFromWatchlist(auctionId) {
   return parseResponse(res);
 }
 
+export async function fetchHostAuctions() {
+  const res = await fetch(`${API_BASE}/api/host/auctions`, {
+    cache: 'no-store',
+    credentials: 'include',
+  });
+  return parseResponse(res);
+}
+
 /**
  * Queries the bidder-specific holdings endpoint if available on the backend.
  * Returns { available: true, data } when implemented, or

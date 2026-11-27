@@ -10,7 +10,7 @@ import {
   PortalErrorState,
   PortalLoadingSkeleton,
 } from '../portal/PortalStates';
-import { fetchAuctions } from '../../services/api';
+import { fetchHostAuctions } from '../../services/api';
 import { useThemePreference } from '../../hooks/useThemePreference';
 import {
   formatINR,
@@ -30,7 +30,7 @@ export default function HostOverviewView() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchAuctions();
+      const res = await fetchHostAuctions();
       setAuctions(Array.isArray(res?.auctions) ? res.auctions : []);
     } catch (err) {
       setError(err?.message || 'Unable to reach the auction server.');
@@ -107,11 +107,6 @@ export default function HostOverviewView() {
             <span>+ Create Auction</span>
           </Link>
         </div>
-
-        <BackendRequirementNotice
-          title="Host authentication & ownership scoping pending backend support"
-          description="The backend does not yet store host_id on auctions or enforce Host session RBAC. Metrics below reflect live server-authoritative auctions from GET /api/auctions."
-        />
 
         {loading ? (
           <PortalLoadingSkeleton />

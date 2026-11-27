@@ -14,7 +14,6 @@ import {
   formatINR,
   formatShortDate,
   getAuctionLotLabel,
-  getAuctionStatusMeta,
 } from '../../utils/formatters';
 
 export default function AdminModerationView() {
@@ -23,11 +22,11 @@ export default function AdminModerationView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [tab, setTab] = useState('PENDING'); // 'PENDING' | 'APPROVED' | 'REJECTED'
+  const [activeTab, setActiveTab] = useState('PENDING'); // 'PENDING' | 'APPROVED' | 'REJECTED'
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAuction, setSelectedAuction] = useState(null);
   const [reason, setReason] = useState('');
-  const [actionFeedback, setActionFeedback] = useState(null);
+  const [actionNotice, setActionNotice] = useState(null);
 
   const loadListings = useCallback(async () => {
     setLoading(true);
@@ -46,46 +45,40 @@ export default function AdminModerationView() {
     loadListings();
   }, [loadListings]);
 
-  // Backend currently has no moderation_status column; existing LIVE/SCHEDULED/CLOSED
-  // rows are already published on the server, so PENDING and REJECTED are strictly 0.
+  // Only classify by moderationStatus if the backend explicitly supplies it
   const categorized = useMemo(() => {
     const pending = [];
     const approved = [];
     const rejected = [];
     auctions.forEach((a) => {
-      if (a.moderationStatus === 'PENDING') pending.push(a);
-      else if (a.moderationStatus === 'REJECTED') rejected.push(a);
-      else approved.push(a);
+      const mod = a.moderationStatus;
+      if (mod === 'REJECTED') rejected.push(a);
+      else if (mod === 'APPROVED') approved.push(a);
+      else if (mod === 'PENDING') pending.push(a);
+      else approved.push(a); // Currently live/seeded auctions have no moderation queue column yet
     });
-    return { pending, approved, rejected };
+    return { PENDING: pending, APPROVED: approved, REJECTED: rejected };
   }, [auctions]);
 
-  const activeList = useMemo(() => {
-    const source =
-      tab === 'PENDING'
-        ? categorized.pending
-        : tab === 'REJECTED'
-        ? categorized.rejected
-        : categorized.approved;
+  const filtered = useMemo(() => {
+    const list = categorized[activeTab] || [];
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return source;
-    return source.filter((a) =>
-      `${a.title} ${a.id} ${a.hostId || ''} ${getAuctionLotLabel(a)}`.toLowerCase().includes(q)
+    if (!q) return list;
+    return list.filter((a) =>
+      `${a.title} ${a.id} ${getAuctionLotLabel(a)} ${a.hostId || ''}`
+        .toLowerCase()
+        .includes(q)
     );
-  }, [tab, categorized, searchQuery]);
+  }, [categorized, activeTab, searchQuery]);
 
-  const handleModerationDecision = (decision) => {
+  const handleModerationAttempt = (decision) => {
     if (decision === 'REJECT' && !reason.trim()) {
-      setActionFeedback({
-        type: 'validation',
-        text: 'Please provide a rejection reason before submitting.',
-      });
+      setActionNotice('Please provide a reason before rejecting a listing.');
       return;
     }
-    setActionFeedback({
-      type: 'error',
-      text: `POST /api/admin/moderation/:id/${decision.toLowerCase()} and moderation_history persistence are not implemented on the backend yet. No server state was changed.`,
-    });
+    setActionNotice(
+      `Moderation ${decision.toLowerCase()} requires backend endpoint POST /api/admin/moderation/:id and Administrator RBAC. Accepted bids and auction results are never modified.`
+    );
   };
 
   return (
@@ -101,21 +94,21 @@ export default function AdminModerationView() {
             Auction Moderation
           </h1>
           <p className="mt-1 text-xs text-slate-500 sm:text-sm dark:text-slate-400">
-            Review auction listings prior to publication. Accepted bids and closed outcomes cannot be modified.
+            Review product listings and uploaded media. Accepted bids and closed results are immutable.
           </p>
         </div>
 
         <BackendRequirementNotice
           accent="purple"
-          title="Moderation workflow columns & endpoints pending backend implementation"
-          description="PostgreSQL auctions table does not yet include moderation_status, moderation_reason, or a moderation_history table. Existing published auctions appear under Approved for read-only inspection."
+          title="Moderation workflow schema & endpoints pending backend support"
+          description="The auctions table does not yet include moderation_status, moderation_reason, or a moderation_history table. Existing listings from GET /api/auctions are shown read-only."
         />
 
         {loading ? (
           <PortalLoadingSkeleton />
         ) : error ? (
           <PortalErrorState
-            title="Unable to load listings for moderation."
+            title="Unable to load moderation queue."
             message={error}
             onRetry={loadListings}
           />
@@ -124,23 +117,23 @@ export default function AdminModerationView() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div role="tablist" className="flex flex-wrap gap-2">
                 {[
-                  { id: 'PENDING', label: 'Pending', count: categorized.pending.length },
-                  { id: 'APPROVED', label: 'Approved / Published', count: categorized.approved.length },
-                  { id: 'REJECTED', label: 'Rejected', count: categorized.rejected.length },
-                ].map((t) => (
+                  { id: 'PENDING', label: 'Pending', count: categorized.PENDING.length },
+                  { id: 'APPROVED', label: 'Published / Live', count: categorized.APPROVED.length },
+                  { id: 'REJECTED', label: 'Rejected', count: categorized.REJECTED.length },
+                ].map((tab) => (
                   <button
-                    key={t.id}
+                    key={tab.id}
                     type="button"
                     role="tab"
-                    aria-selected={tab === t.id}
-                    onClick={() => setTab(t.id)}
+                    aria-selected={activeTab === tab.id}
+                    onClick={() => setActiveTab(tab.id)}
                     className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition ${
-                      tab === t.id
-                        ? 'bg-purple-600 text-white dark:bg-purple-500 dark:text-[#12071f]'
+                      activeTab === tab.id
+                        ? 'bg-purple-600 text-white dark:bg-purple-500'
                         : 'border border-auctionme-lightBorder bg-auctionme-lightPanel text-slate-600 dark:border-auctionme-darkBorder dark:bg-auctionme-darkPanel dark:text-slate-300'
                     }`}
                   >
-                    {t.label} ({t.count})
+                    {tab.label} ({tab.count})
                   </button>
                 ))}
               </div>
@@ -150,19 +143,15 @@ export default function AdminModerationView() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search by lot, item or host..."
-                aria-label="Search moderation queue"
-                className="w-full rounded-xl border border-auctionme-lightBorder bg-auctionme-lightPanel px-3.5 py-2 text-xs sm:w-72 dark:border-auctionme-darkBorder dark:bg-auctionme-darkInput"
+                aria-label="Search moderation listings"
+                className="w-full rounded-xl border border-auctionme-lightBorder bg-auctionme-lightPanel px-3.5 py-2 text-xs text-slate-900 placeholder-slate-400 focus:border-purple-500 focus:outline-none sm:w-72 dark:border-auctionme-darkBorder dark:bg-auctionme-darkInput dark:text-white"
               />
             </div>
 
-            {activeList.length === 0 ? (
+            {filtered.length === 0 ? (
               <PortalEmptyState
-                title={`No ${tab.toLowerCase()} listings`}
-                description={
-                  tab === 'PENDING'
-                    ? 'Pending host submissions will appear here once moderation_status is added to the backend.'
-                    : 'No listings match this moderation filter.'
-                }
+                title={`No ${activeTab.toLowerCase()} listings`}
+                description="Listings matching this moderation queue will appear here once backend moderation state is enabled."
               />
             ) : (
               <div className="overflow-x-auto rounded-2xl border border-auctionme-lightBorder bg-auctionme-lightPanel shadow-sm dark:border-auctionme-darkBorder dark:bg-auctionme-darkPanel">
@@ -170,48 +159,47 @@ export default function AdminModerationView() {
                   <thead className="border-b border-auctionme-lightBorder bg-slate-50/80 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:border-auctionme-darkBorder dark:bg-auctionme-darkInput/60 dark:text-slate-400">
                     <tr>
                       <th className="px-4 py-3">Lot / Item</th>
-                      <th className="px-4 py-3">Lifecycle</th>
+                      <th className="px-4 py-3">Auction Status</th>
                       <th className="px-4 py-3">Starting Price</th>
                       <th className="px-4 py-3">Created</th>
                       <th className="px-4 py-3 text-right">Review</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200/80 dark:divide-auctionme-darkBorder/80">
-                    {activeList.map((a) => {
-                      const statusMeta = getAuctionStatusMeta(a.status);
-                      return (
-                        <tr key={a.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30">
-                          <td className="px-4 py-3.5">
-                            <div className="font-mono text-[10px] text-slate-400">{getAuctionLotLabel(a)}</div>
-                            <div className="font-semibold text-slate-900 dark:text-white">{a.title}</div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${statusMeta.badgeClass}`}>
-                              {statusMeta.label}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5 font-mono font-semibold text-slate-800 dark:text-slate-200">
-                            {formatINR(a.startingPrice)}
-                          </td>
-                          <td className="px-4 py-3.5 text-slate-500 dark:text-slate-400">
-                            {formatShortDate(a.createdAt)}
-                          </td>
-                          <td className="px-4 py-3.5 text-right">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedAuction(a);
-                                setReason('');
-                                setActionFeedback(null);
-                              }}
-                              className="rounded-lg border border-purple-500/35 bg-purple-50 px-3 py-1.5 text-[11px] font-bold text-purple-700 hover:bg-purple-600 hover:text-white dark:border-purple-400/35 dark:bg-purple-500/15 dark:text-purple-300"
-                            >
-                              Inspect
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {filtered.map((a) => (
+                      <tr key={a.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30">
+                        <td className="px-4 py-3.5">
+                          <div className="font-mono text-[10px] font-semibold text-slate-400">
+                            {getAuctionLotLabel(a)}
+                          </div>
+                          <div className="font-semibold text-slate-900 dark:text-white">
+                            {a.title}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5 font-mono text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                          {a.status}
+                        </td>
+                        <td className="px-4 py-3.5 font-mono font-bold text-purple-700 dark:text-purple-400">
+                          {formatINR(a.startingPrice)}
+                        </td>
+                        <td className="px-4 py-3.5 text-slate-500 dark:text-slate-400">
+                          {formatShortDate(a.createdAt)}
+                        </td>
+                        <td className="px-4 py-3.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedAuction(a);
+                              setReason('');
+                              setActionNotice(null);
+                            }}
+                            className="rounded-lg border border-purple-500/35 bg-purple-50 px-3 py-1.5 text-[11px] font-bold text-purple-700 hover:bg-purple-600 hover:text-white dark:border-purple-400/35 dark:bg-purple-500/15 dark:text-purple-300"
+                          >
+                            Review
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -220,7 +208,7 @@ export default function AdminModerationView() {
         )}
       </div>
 
-      {/* Review Drawer */}
+      {/* Moderation Review Drawer */}
       {selectedAuction && (
         <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true">
           <div className="fixed inset-0 bg-black/60 backdrop-blur-xs" onClick={() => setSelectedAuction(null)} />
@@ -241,7 +229,9 @@ export default function AdminModerationView() {
 
             <div className="mt-4 flex-1 space-y-4 overflow-y-auto text-xs">
               <div>
-                <p className="font-mono text-[10px] text-slate-400">{getAuctionLotLabel(selectedAuction)}</p>
+                <p className="font-mono text-[10px] text-slate-400">
+                  {getAuctionLotLabel(selectedAuction)} · {selectedAuction.status}
+                </p>
                 <h3 className="mt-1 font-serif text-base font-semibold text-slate-900 dark:text-white">
                   {selectedAuction.title}
                 </h3>
@@ -250,42 +240,42 @@ export default function AdminModerationView() {
                 </p>
               </div>
 
-              <div className="rounded-xl border border-auctionme-lightBorder bg-slate-50/70 p-3 dark:border-auctionme-darkBorder dark:bg-auctionme-darkInput/60">
-                <p className="font-semibold text-slate-800 dark:text-slate-200">Moderation Reason</p>
+              <div>
+                <label htmlFor="mod-reason" className="block font-semibold text-slate-700 dark:text-slate-200">
+                  Moderation Reason / Notes
+                </label>
                 <textarea
+                  id="mod-reason"
                   rows={3}
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
-                  placeholder="Enter reason for approval note or rejection..."
-                  className="mt-2 w-full rounded-lg border border-auctionme-lightBorder bg-white p-2 text-xs dark:border-auctionme-darkBorder dark:bg-auctionme-darkPanel"
+                  placeholder="Required if rejecting a listing..."
+                  className="mt-1.5 w-full rounded-xl border border-auctionme-lightBorder bg-white px-3 py-2 text-xs dark:border-auctionme-darkBorder dark:bg-auctionme-darkInput"
                 />
               </div>
 
-              {actionFeedback && (
-                <div
-                  role="alert"
-                  className="rounded-xl border border-rose-500/35 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-300"
-                >
-                  {actionFeedback.text}
+              {actionNotice && (
+                <div role="alert" className="rounded-xl border border-purple-500/35 bg-purple-500/10 p-3 text-xs text-purple-800 dark:text-purple-200">
+                  {actionNotice}
                 </div>
               )}
-            </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-2.5 border-t border-auctionme-lightBorder pt-3 dark:border-auctionme-darkBorder">
-              <button
-                type="button"
-                onClick={() => handleModerationDecision('APPROVE')}
-                className="rounded-xl bg-auctionme-emeraldLight py-2.5 text-xs font-bold text-white dark:bg-auctionme-emeraldDark dark:text-[#061b12]"
-              >
-                Approve
-              </button>
-              <button
-                type="button"
-                onClick={() => handleModerationDecision('REJECT')}
-                className="rounded-xl border border-rose-500/40 bg-rose-500/10 py-2.5 text-xs font-bold text-rose-600 dark:text-rose-400"
-              >
-                Reject
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleModerationAttempt('APPROVE')}
+                  className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white hover:bg-emerald-700"
+                >
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleModerationAttempt('REJECT')}
+                  className="flex-1 rounded-xl bg-rose-600 py-2.5 text-xs font-bold text-white hover:bg-rose-700"
+                >
+                  Reject
+                </button>
+              </div>
             </div>
           </div>
         </div>

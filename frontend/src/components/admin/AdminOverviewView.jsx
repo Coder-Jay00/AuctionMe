@@ -31,7 +31,7 @@ export default function AdminOverviewView() {
       const res = await fetchAuctions();
       setAuctions(Array.isArray(res?.auctions) ? res.auctions : []);
     } catch (err) {
-      setError(err?.message || 'Unable to load platform overview.');
+      setError(err?.message || 'Unable to reach platform API.');
     } finally {
       setLoading(false);
     }
@@ -62,14 +62,14 @@ export default function AdminOverviewView() {
       if (a.closedAt) {
         events.push({
           id: `${a.id}-closed`,
-          label: `${getAuctionLotLabel(a)} closed (${a.winnerId ? `Winner: ${a.winnerId}` : 'No winner'})`,
+          text: `${getAuctionLotLabel(a)} closed (${a.winnerId ? `Winner: ${a.winnerId}` : 'No winner'})`,
           timestamp: a.closedAt,
         });
       }
       if (a.startsAt) {
         events.push({
           id: `${a.id}-started`,
-          label: `${getAuctionLotLabel(a)} — ${a.title} scheduled/started`,
+          text: `${getAuctionLotLabel(a)} scheduled/started — ${a.title}`,
           timestamp: a.startsAt,
         });
       }
@@ -92,14 +92,14 @@ export default function AdminOverviewView() {
             Admin Overview
           </h1>
           <p className="mt-1 text-xs text-slate-500 sm:text-sm dark:text-slate-400">
-            Platform health, auction volume, and operational visibility.
+            Platform health, live auction volume, and server-recorded activity.
           </p>
         </div>
 
         <BackendRequirementNotice
           accent="purple"
-          title="Administrator RBAC & user metrics API not implemented yet"
-          description="Total Users requires a backend users table and authenticated GET /api/admin/metrics endpoint. Auction counts, live count, and active/closed bid value below come from real GET /api/auctions records."
+          title="Administrator RBAC & user metrics endpoint required"
+          description="Total Users requires a users table and GET /api/admin/overview with server-side Administrator authorization. Auction counts and bid value below are computed strictly from GET /api/auctions."
         />
 
         {loading ? (
@@ -112,18 +112,17 @@ export default function AdminOverviewView() {
           />
         ) : (
           <>
-            {/* KPI Row */}
             <section className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
               <div className="rounded-2xl border border-auctionme-lightBorder bg-auctionme-lightPanel p-4 shadow-sm dark:border-auctionme-darkBorder dark:bg-auctionme-darkPanel">
-                <p className="font-mono text-lg font-bold text-slate-400 sm:text-xl dark:text-slate-500">
-                  Not available
+                <p className="font-mono text-lg font-bold text-slate-400 dark:text-slate-500">
+                  N/A
                 </p>
                 <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-                  Total Users (No Users API)
+                  Total Users (API pending)
                 </p>
               </div>
               <div className="rounded-2xl border border-auctionme-lightBorder bg-auctionme-lightPanel p-4 shadow-sm dark:border-auctionme-darkBorder dark:bg-auctionme-darkPanel">
-                <p className="font-sans text-2xl font-bold tabular-nums text-purple-700 dark:text-purple-300">
+                <p className="font-sans text-2xl font-bold tabular-nums text-purple-700 dark:text-purple-400">
                   {metrics.totalAuctions}
                 </p>
                 <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -139,16 +138,15 @@ export default function AdminOverviewView() {
                 </p>
               </div>
               <div className="rounded-2xl border border-auctionme-lightBorder bg-auctionme-lightPanel p-4 shadow-sm dark:border-auctionme-darkBorder dark:bg-auctionme-darkPanel">
-                <p className="truncate font-mono text-xl font-bold tabular-nums text-purple-700 dark:text-purple-300">
+                <p className="truncate font-sans text-xl font-bold tabular-nums text-purple-700 dark:text-purple-400">
                   {formatINR(metrics.totalBidValuePaise)}
                 </p>
                 <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-                  Total Top-Bid Value
+                  Active &amp; Closed Bid Value
                 </p>
               </div>
             </section>
 
-            {/* Platform Activity Chart */}
             <ActivityChart
               title="Platform Activity"
               auctions={auctions}
@@ -157,68 +155,38 @@ export default function AdminOverviewView() {
               accent="purple"
             />
 
-            {/* Recent Platform Events & Operational Links */}
-            <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
-              <section className="rounded-2xl border border-auctionme-lightBorder bg-auctionme-lightPanel p-5 shadow-sm lg:col-span-7 dark:border-auctionme-darkBorder dark:bg-auctionme-darkPanel">
-                <div className="flex items-center justify-between">
-                  <h2 className="font-serif text-base font-semibold text-slate-900 dark:text-white">
-                    Recent Platform Events
-                  </h2>
-                  <Link
-                    href="/admin/audit"
-                    className="text-xs font-semibold text-purple-700 hover:underline dark:text-purple-300"
-                  >
-                    Audit Logs →
-                  </Link>
-                </div>
-
-                {recentEvents.length === 0 ? (
-                  <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
-                    No auction events recorded yet.
-                  </p>
-                ) : (
-                  <ul className="mt-4 divide-y divide-slate-200/80 dark:divide-auctionme-darkBorder/80">
-                    {recentEvents.map((ev) => (
-                      <li
-                        key={ev.id}
-                        className="flex items-center justify-between gap-3 py-2.5 text-xs"
-                      >
-                        <span className="text-slate-700 dark:text-slate-200">{ev.label}</span>
-                        <span className="shrink-0 text-[10px] text-slate-400">
-                          {formatShortDate(ev.timestamp)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-
-              <section className="rounded-2xl border border-auctionme-lightBorder bg-auctionme-lightPanel p-5 shadow-sm lg:col-span-5 dark:border-auctionme-darkBorder dark:bg-auctionme-darkPanel">
+            <section className="rounded-2xl border border-auctionme-lightBorder bg-auctionme-lightPanel p-5 shadow-sm dark:border-auctionme-darkBorder dark:bg-auctionme-darkPanel">
+              <div className="flex items-center justify-between">
                 <h2 className="font-serif text-base font-semibold text-slate-900 dark:text-white">
-                  Governance Modules
+                  Recent Platform Events
                 </h2>
-                <div className="mt-4 space-y-2.5 text-xs">
-                  {[
-                    { href: '/admin/users', title: 'Users & Roles', note: 'Requires users table + RBAC' },
-                    { href: '/admin/moderation', title: 'Auction Moderation', note: 'Inspect live/scheduled lots' },
-                    { href: '/admin/complaints', title: 'Complaints & Disputes', note: 'Requires complaints API' },
-                    { href: '/admin/audit', title: 'Audit & Logs', note: 'Read-only tamper-resistant view' },
-                  ].map((item) => (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className="flex items-center justify-between rounded-xl border border-auctionme-lightBorder bg-slate-50/70 px-3.5 py-2.5 transition hover:border-purple-500/40 dark:border-auctionme-darkBorder dark:bg-auctionme-darkInput/70 dark:hover:border-purple-400/40"
+                <Link
+                  href="/admin/audit"
+                  className="text-xs font-semibold text-purple-700 hover:underline dark:text-purple-400"
+                >
+                  View Audit &amp; Logs →
+                </Link>
+              </div>
+              {recentEvents.length === 0 ? (
+                <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
+                  No server events recorded yet.
+                </p>
+              ) : (
+                <ul className="mt-4 divide-y divide-slate-200/80 dark:divide-auctionme-darkBorder/80">
+                  {recentEvents.map((ev) => (
+                    <li
+                      key={ev.id}
+                      className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-xs"
                     >
-                      <div>
-                        <p className="font-semibold text-slate-900 dark:text-white">{item.title}</p>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">{item.note}</p>
-                      </div>
-                      <span className="text-purple-600 dark:text-purple-400">→</span>
-                    </Link>
+                      <span className="text-slate-800 dark:text-slate-200">{ev.text}</span>
+                      <span className="font-mono text-[11px] text-slate-400">
+                        {formatShortDate(ev.timestamp)}
+                      </span>
+                    </li>
                   ))}
-                </div>
-              </section>
-            </div>
+                </ul>
+              )}
+            </section>
           </>
         )}
       </div>

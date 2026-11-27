@@ -191,10 +191,55 @@ async function removeFromWatchlist(user, auctionId) {
   return { ok: true, auctionId };
 }
 
+async function getMyNotifications(user, limit = 50) {
+  const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 50, 1), 100);
+  const res = await pool.query(
+    `SELECT n.id, n.auction_id, n.type, n.title, n.message, n.is_read, n.created_at,
+            a.title AS auction_title
+     FROM notifications n
+     LEFT JOIN auctions a ON a.id = n.auction_id
+     WHERE n.user_id = $1
+     ORDER BY n.created_at DESC
+     LIMIT $2`,
+    [user.id, safeLimit]
+  );
+  return {
+    notifications: res.rows.map((row) => ({
+      id: row.id,
+      auctionId: row.auction_id,
+      auctionTitle: row.auction_title || null,
+      type: row.type,
+      title: row.title,
+      message: row.message,
+      isRead: Boolean(row.is_read),
+      createdAt: new Date(row.created_at).toISOString(),
+    })),
+  };
+}
+
+async function markNotificationRead(user, notificationId) {
+  if (!isValidUuid(notificationId)) {
+    throw new AppError(400, 'INVALID_NOTIFICATION_ID', 'Invalid notification ID format.');
+  }
+  const res = await pool.query(
+    `UPDATE notifications
+     SET is_read = TRUE
+     WHERE id = $1 AND user_id = $2
+     RETURNING id, is_read`,
+    [notificationId, user.id]
+  );
+  if (res.rows.length === 0) {
+    throw new AppError(404, 'NOTIFICATION_NOT_FOUND', 'Notification not found.');
+  }
+  return { id: res.rows[0].id, isRead: true };
+}
+
 module.exports = {
   getMyBids,
   getMyHoldings,
   getMyWatchlist,
   addToWatchlist,
   removeFromWatchlist,
+  getMyNotifications,
+  markNotificationRead,
 };

@@ -6,6 +6,8 @@ const {
   getMyWatchlist,
   addToWatchlist,
   removeFromWatchlist,
+  getMyNotifications,
+  markNotificationRead,
 } = require('../services/bidderService');
 
 function createMeRouter() {
@@ -57,6 +59,26 @@ function createMeRouter() {
   router.delete('/watchlist/:auctionId', async (req, res, next) => {
     try {
       const data = await removeFromWatchlist(req.user, req.params.auctionId);
+      res.json(data);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /api/me/notifications
+  router.get('/notifications', async (req, res, next) => {
+    try {
+      const data = await getMyNotifications(req.user, req.query.limit);
+      res.json(data);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // PATCH /api/me/notifications/:id/read
+  router.patch('/notifications/:id/read', async (req, res, next) => {
+    try {
+      const data = await markNotificationRead(req.user, req.params.id);
       res.json(data);
     } catch (err) {
       next(err);

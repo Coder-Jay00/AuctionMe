@@ -4,6 +4,7 @@ const { formatUser } = require('./authService');
 
 const VALID_ROLES = ['BIDDER', 'HOST', 'ADMIN'];
 const VALID_MODERATION_STATUSES = ['APPROVED', 'FLAGGED', 'SUSPENDED'];
+const VALID_COMPLAINT_STATUSES = ['OPEN', 'UNDER_REVIEW', 'RESOLVED', 'DISMISSED'];
 
 async function recordAuditLog(actorUserId, action, targetType, targetId, details = null) {
   await pool.query(
@@ -187,6 +188,68 @@ async function listAuditLogs(limit = 100) {
   }));
 }
 
+async function listComplaints(limit = 100) {
+  const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 200);
+  const res = await pool.query(
+    `SELECT c.*, u.auction_me_id AS reporter_auction_me_id, u.display_name AS reporter_name,
+            a.title AS auction_title
+     FROM complaints c
+     INNER JOIN users u ON u.id = c.reporter_user_id
+     LEFT JOIN auctions a ON a.id = c.auction_id
+     ORDER BY c.created_at DESC
+     LIMIT $1`,
+    [safeLimit]
+  );
+  return res.rows.map((row) => ({
+    id: row.id,
+    reporterUserId: row.reporter_user_id,
+    reporterAuctionMeId: row.reporter_auction_me_id,
+    reporterName: row.reporter_name,
+    auctionId: row.auction_id,
+    auctionTitle: row.auction_title || null,
+    subject: row.subject,
+    description: row.description,
+    status: row.status,
+    resolutionNote: row.resolution_note || null,
+    resolvedBy: row.resolved_by || null,
+    createdAt: new Date(row.created_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
+  }));
+}
+
+async function updateComplaint(adminUser, complaintId, { status, resolutionNote }) {
+  if (!isValidUuid(complaintId)) {
+    throw new AppError(400, 'INVALID_COMPLAINT_ID', 'Invalid complaint ID format.');
+  }
+  if (!VALID_COMPLAINT_STATUSES.includes(status)) {
+    throw new AppError(
+      400,
+      'INVALID_COMPLAINT_STATUS',
+      `status must be one of: ${VALID_COMPLAINT_STATUSES.join(', ')}.`
+    );
+  }
+  const note =
+    typeof resolutionNote === 'string' ? resolutionNote.trim().slice(0, 1000) : null;
+  const res = await pool.query(
+    `UPDATE complaints
+     SET status = $2,
+         resolution_note = $3,
+         resolved_by = $4,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [complaintId, status, note, adminUser.id]
+  );
+  if (res.rows.length === 0) {
+    throw new AppError(404, 'COMPLAINT_NOT_FOUND', 'Complaint not found.');
+  }
+  await recordAuditLog(adminUser.id, 'COMPLAINT_UPDATED', 'COMPLAINT', complaintId, {
+    status,
+    resolutionNote: note,
+  });
+  return res.rows[0];
+}
+
 module.exports = {
   listUsers,
   updateUserRole,
@@ -194,4 +257,6 @@ module.exports = {
   listAllAuctionsForAdmin,
   moderateAuction,
   listAuditLogs,
+  listComplaints,
+  updateComplaint,
 };

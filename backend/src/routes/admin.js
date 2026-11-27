@@ -7,6 +7,8 @@ const {
   listAllAuctionsForAdmin,
   moderateAuction,
   listAuditLogs,
+  listComplaints,
+  updateComplaint,
 } = require('../services/adminService');
 
 function createAdminRouter() {
@@ -75,6 +77,30 @@ function createAdminRouter() {
     try {
       const logs = await listAuditLogs(req.query.limit);
       res.json({ logs });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /api/admin/complaints
+  router.get('/complaints', async (req, res, next) => {
+    try {
+      const complaints = await listComplaints(req.query.limit);
+      res.json({ complaints });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // PATCH /api/admin/complaints/:id
+  router.patch('/complaints/:id', async (req, res, next) => {
+    try {
+      const { status, resolutionNote } = req.body || {};
+      const complaint = await updateComplaint(req.user, req.params.id, {
+        status,
+        resolutionNote,
+      });
+      res.json({ complaint });
     } catch (err) {
       next(err);
     }

@@ -343,6 +343,7 @@ Never commit `.env` or `frontend/.env.local` to version control (both are listed
 | `NODE_ENV` | Runtime mode (`development` or `production`; controls `Secure` cookie flag) | `development` | Optional (default `development`) |
 | `CORS_ORIGIN` | Comma-separated allowed frontend origins | `http://localhost:3000` | Optional (default `http://localhost:3000`) |
 | `CLOSING_WORKER_INTERVAL_MS` | Polling interval (ms) for expired-auction closing worker | `1000` | Optional (default `1000`) |
+| `DEMO_PASSWORD` | Assessment password for local `npm run db:seed` demo accounts (never printed in production) | `AuctionMe@2025` | Optional in dev; required if seeding in production |
 | `NEXT_PUBLIC_API_URL` | Express REST API base URL for Next.js | `http://localhost:4000` | **Required** (frontend) |
 | `NEXT_PUBLIC_SOCKET_URL` | Express Socket.IO server URL for Next.js | `http://localhost:4000` | **Required** (frontend) |
 
@@ -443,21 +444,23 @@ erDiagram
 
 ## 10. Demo Accounts and Seed Data
 
-### Actual Seeded Accounts (`backend/scripts/seed.js`)
-Running `cd backend && npm run db:seed` upserts four local development accounts (all passwords hashed with `scrypt`):
+### Seeded Accounts (`backend/scripts/seed.js`)
+Running `cd backend && npm run db:seed` idempotently upserts the three required role demo accounts plus two supporting competing bidders (all passwords hashed with `scrypt` using `DEMO_PASSWORD` from `backend/.env`):
 
-| Role | Seeded `auction_me_id` | Display Name | Assessment Alias Note |
+| Role | Seeded `auction_me_id` | Display Name | Notes |
 |---|---|---|---|
-| `BIDDER` | `bidder-aarav-01` | Aarav Mehta | Assessment spec mentions `demo_bidder` (not currently seeded under that ID) |
-| `BIDDER` | `bidder-meera-02` | Meera Nair | Secondary bidder for multi-client testing |
-| `HOST` | `host-curate-01` | Curated Horology House | Assessment spec mentions `demo_host` (not currently seeded under that ID) |
-| `ADMIN` | `admin-01` | AuctionMe Admin | Assessment spec mentions `demo_admin` (not currently seeded under that ID) |
+| `BIDDER` | `demo_bidder` | Demo Bidder | Primary bidder demo account (has active bids, won auction, watchlist & 4 notifications) |
+| `HOST` | `demo_host` | Demo Auction House | Owns all 7 seeded auctions across LIVE, SCHEDULED, and CLOSED states |
+| `ADMIN` | `demo_admin` | Demo Administrator | Can manage users/roles, moderate auctions, view complaints & audit logs |
+| `BIDDER` | `bidder_aarav` | Aarav Mehta | Supporting competing bidder |
+| `BIDDER` | `bidder_meera` | Meera Nair | Supporting competing bidder |
 
-> **Credential Safety Note:** Local seed passwords are defined only inside `backend/scripts/seed.js` for local development and are intentionally omitted from this README. For shared or staging environments, configure seed passwords via environment variables (e.g., `SEED_ADMIN_PASSWORD`, `SEED_HOST_PASSWORD`, `SEED_BIDDER_PASSWORD`) and **never** reuse local assessment credentials in production.
+> **Credential Safety Note:** Passwords are configured via `DEMO_PASSWORD` in `backend/.env` and stored exclusively as salted `scrypt` hashes in PostgreSQL. Local seed output prints the configured assessment credentials only when `NODE_ENV !== 'production'`.
 
-### Seeded Auction Record & Safe Re-Seeding
-- Seeds one live demonstration auction (`11111111-1111-4111-8111-111111111111` — *1969 Grand Seiko Hi-Beat 36000 — Collector Edition*, starting price `₹25,000`, current price `₹26,500`, minimum increment `₹500`, 5-minute remaining window) with two initial bids (`bidder-meera-02` and `bidder-aarav-01`).
-- **Safe re-seeding:** `npm run db:seed` uses `ON CONFLICT (auction_me_id) DO UPDATE` for users and deletes/re-inserts only the fixed demo auction UUID, making repeated execution idempotent and deterministic.
+### Seeded Records & Idempotency
+- **7 deterministic auctions** assigned to `demo_host`: 3 `LIVE`, 2 `SCHEDULED` (upcoming), and 2 `CLOSED` (including a won Rolex Datejust 1601 with `winner_id = 'demo_bidder'`).
+- **13 monotonic valid bids**, **3 watchlist entries** for `demo_bidder`, **4 notifications** (`BID_ACCEPTED`, `OUTBID`, `AUCTION_EXTENDED`, `RESULT_DECLARED`), **1 sample complaint** (`OPEN`), and **2 audit log entries** for `demo_admin`.
+- **Safe re-seeding:** All records use fixed deterministic UUIDs with `ON CONFLICT DO UPDATE` / `ON CONFLICT DO NOTHING` — running `npm run db:seed` repeatedly produces zero duplicates.
 
 ---
 
